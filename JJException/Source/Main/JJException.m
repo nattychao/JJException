@@ -39,4 +39,8 @@
     [JJExceptionProxy shareExceptionProxy].delegate = exceptionHandle;
 }
 
++ (BOOL)isGuardCategoryEnabled:(JJExceptionGuardCategory)category {
+    return JJExceptionGuardEnabled(category);
+}
+
 @end

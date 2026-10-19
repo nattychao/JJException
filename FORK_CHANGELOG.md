@@ -203,7 +203,7 @@ delegate 抛异常不会把已恢复的异常变成新崩溃。
 
 ## 3. 新增能力：运行时可开关
 
-文件：`JJExceptionProxy.h/.m`（新增 `JJExceptionGuardEnabled(JJExceptionGuardCategory)`）
+文件：`JJException.h`（公共 API）、`JJExceptionProxy.h/.m`（实现）
 
 上游的 `startGuardException` / `stopGuardException` 只在"关→开"时重新 swizzle；swizzle 本身
 又是交换 IMP，所以 stop→start 会把守卫换回去。而且**没有任何办法单独开关某一个 category**。
@@ -214,9 +214,29 @@ delegate 抛异常不会把已恢复的异常变成新崩溃。
 - 每个 hook 入口先查 `JJExceptionGuardEnabled(category)`
 - 于是 `configExceptionCategory:` 和 `stop/startGuardException` **立即生效**，
   不需要重启，也不会出现"开关一次就把守卫弄丢"
+- 公开两个查询入口：
+
+```objc
+BOOL on = [JJException isGuardCategoryEnabled:JJExceptionGuardArrayContainer];
+// 钩子内部用的 C 版本，避免高频消息派发：
+// BOOL JJExceptionGuardEnabled(JJExceptionGuardCategory category);
+```
+
+- `stopGuardException` 上的 `deprecated` 标记已移除：本 fork 修掉了上游 #54 的反复开关崩溃
 
 > 注意：`stopGuardException` 之后调用非法 API 会真的崩——那是"关闭防护"的正确含义，
 > 不要用它来做 A/B 对比中的"安全态"。
+
+---
+
+## 3.1 构建 / 集成层面的修正
+
+| 项目 | 上游 | 本 fork |
+|---|---|---|
+| `s.ios.deployment_target` | `"8.0"` | `"15.0"`。Xcode 27 直接拒绝 8.0（"supported deployment target versions is 15.0 to 27.1.x"），集成阶段就构建失败 |
+| `s.osx/watchos/tvos.deployment_target` | 都声明了 | 注释掉，只声明 iOS（本 fork 未在其他平台验证） |
+| `s.homepage` / `s.source` | 指向上游 | 指向本 fork |
+| `MRC` subspec 依赖 | 缺 `DeallocBlock` | 补上。`NSObject+KVOCrash.m` 以 MRC 编译，clang 禁止在 MRC 文件里写 `__weak`，所以弱引用要通过 ARC 编译的 `JJWeakObjectBox` 实现 |
 
 ---
 

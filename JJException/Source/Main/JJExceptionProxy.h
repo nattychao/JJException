@@ -79,17 +79,4 @@ __attribute__((overloadable)) void handleCrashException(JJExceptionGuardCategory
 
 @end
 
-/**
- Runtime gate consulted at the top of every hook.
-
- Hooks are installed once and stay installed, so this is what makes
- startGuardException / stopGuardException / configExceptionCategory take effect
- immediately instead of only at launch. It also lets a host app enable or disable
- one category at a time without relaunching.
-
- @param category the category the calling hook belongs to
- @return YES when that category is both configured and currently protecting
- */
-FOUNDATION_EXPORT BOOL JJExceptionGuardEnabled(JJExceptionGuardCategory category);
-
 NS_ASSUME_NONNULL_END

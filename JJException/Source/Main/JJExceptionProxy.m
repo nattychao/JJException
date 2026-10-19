@@ -169,50 +169,69 @@ uintptr_t get_slide_address(void) {
     dispatch_semaphore_wait(_swizzleLock, DISPATCH_TIME_FOREVER);
     if (_isProtectException != isProtectException) {
         _isProtectException = isProtectException;
-        
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Wundeclared-selector"
-        
-        if(self.exceptionGuardCategory & JJExceptionGuardArrayContainer){
-            [NSArray performSelector:@selector(jj_swizzleNSArray)];
-            [NSMutableArray performSelector:@selector(jj_swizzleNSMutableArray)];
-            [NSSet performSelector:@selector(jj_swizzleNSSet)];
-            [NSMutableSet performSelector:@selector(jj_swizzleNSMutableSet)];
+        if (isProtectException) {
+            [self jj_installSwizzlesForEnabledCategories];
         }
-        if(self.exceptionGuardCategory & JJExceptionGuardDictionaryContainer){
-            [NSDictionary performSelector:@selector(jj_swizzleNSDictionary)];
-            [NSMutableDictionary performSelector:@selector(jj_swizzleNSMutableDictionary)];
-        }
-        if(self.exceptionGuardCategory & JJExceptionGuardUnrecognizedSelector){
-            [NSObject performSelector:@selector(jj_swizzleUnrecognizedSelector)];
-        }
-        
-        if (self.exceptionGuardCategory & JJExceptionGuardKVOCrash) {
-            [NSObject performSelector:@selector(jj_swizzleKVOCrash)];
-        }
-        
-        if (self.exceptionGuardCategory & JJExceptionGuardNSTimer) {
-            [NSTimer performSelector:@selector(jj_swizzleNSTimer)];
-        }
-        
-        if (self.exceptionGuardCategory & JJExceptionGuardNSNotificationCenter) {
-            [NSNotificationCenter performSelector:@selector(jj_swizzleNSNotificationCenter)];
-        }
-        
-        if (self.exceptionGuardCategory & JJExceptionGuardNSStringContainer) {
-            [NSString performSelector:@selector(jj_swizzleNSString)];
-            [NSMutableString performSelector:@selector(jj_swizzleNSMutableString)];
-            [NSAttributedString performSelector:@selector(jj_swizzleNSAttributedString)];
-            [NSMutableAttributedString performSelector:@selector(jj_swizzleNSMutableAttributedString)];
-        }
-        #pragma clang diagnostic pop
     }
     dispatch_semaphore_signal(_swizzleLock);
+}
+
+/// Installs the hooks for every category currently in the mask.
+///
+/// Called both when protection turns on and whenever the mask changes while
+/// protection is already active. Every hook is idempotent (see
+/// NSObject+SwizzleHook.m), so calling this repeatedly is safe and is what makes
+/// `configExceptionCategory:` take effect without restarting the app.
+- (void)jj_installSwizzlesForEnabledCategories {
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wundeclared-selector"
+
+    if(self.exceptionGuardCategory & JJExceptionGuardArrayContainer){
+        [NSArray performSelector:@selector(jj_swizzleNSArray)];
+        [NSMutableArray performSelector:@selector(jj_swizzleNSMutableArray)];
+        [NSSet performSelector:@selector(jj_swizzleNSSet)];
+        [NSMutableSet performSelector:@selector(jj_swizzleNSMutableSet)];
+    }
+    if(self.exceptionGuardCategory & JJExceptionGuardDictionaryContainer){
+        [NSDictionary performSelector:@selector(jj_swizzleNSDictionary)];
+        [NSMutableDictionary performSelector:@selector(jj_swizzleNSMutableDictionary)];
+    }
+    if(self.exceptionGuardCategory & JJExceptionGuardUnrecognizedSelector){
+        [NSObject performSelector:@selector(jj_swizzleUnrecognizedSelector)];
+    }
+
+    if (self.exceptionGuardCategory & JJExceptionGuardKVOCrash) {
+        [NSObject performSelector:@selector(jj_swizzleKVOCrash)];
+    }
+
+    if (self.exceptionGuardCategory & JJExceptionGuardNSTimer) {
+        [NSTimer performSelector:@selector(jj_swizzleNSTimer)];
+    }
+
+    if (self.exceptionGuardCategory & JJExceptionGuardNSNotificationCenter) {
+        [NSNotificationCenter performSelector:@selector(jj_swizzleNSNotificationCenter)];
+    }
+
+    if (self.exceptionGuardCategory & JJExceptionGuardNSStringContainer) {
+        [NSString performSelector:@selector(jj_swizzleNSString)];
+        [NSMutableString performSelector:@selector(jj_swizzleNSMutableString)];
+        [NSAttributedString performSelector:@selector(jj_swizzleNSAttributedString)];
+        [NSMutableAttributedString performSelector:@selector(jj_swizzleNSMutableAttributedString)];
+    }
+    #pragma clang diagnostic pop
 }
 
 - (void)setExceptionGuardCategory:(JJExceptionGuardCategory)exceptionGuardCategory{
     if (_exceptionGuardCategory != exceptionGuardCategory) {
         _exceptionGuardCategory = exceptionGuardCategory;
+    }
+    // Enabling a category at runtime must install its hooks now; otherwise the
+    // hook would only appear after the next stop/start cycle. Installing is
+    // idempotent, so this is a no-op when nothing new was requested.
+    if (self.isProtectException) {
+        dispatch_semaphore_wait(_swizzleLock, DISPATCH_TIME_FOREVER);
+        [self jj_installSwizzlesForEnabledCategories];
+        dispatch_semaphore_signal(_swizzleLock);
     }
 }
 

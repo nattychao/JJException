@@ -93,11 +93,17 @@ typedef NS_OPTIONS(NSInteger,JJExceptionGuardCategory){
 
 /**
  Stop the exception protect
- 
+
  * Why deprecated this method:
  * https://github.com/jezzmemo/JJException/issues/54
+ *
+ * This fork made the guard safe to stop and start (each selector is swizzled
+ * exactly once), so the infinite-loop crash described upstream no longer occurs.
+ * Note that while stopped, invalid calls behave exactly like Foundation: they
+ * crash. Use -stopGuardException only to disable protection, never as a way to
+ * compare behaviour inside a running app that must stay alive.
  */
-+ (void)stopGuardException __attribute__((deprecated("Stop invoke this method,If invoke this,Maybe occur the infinite loop and then CRASH")));
++ (void)stopGuardException;
 
 /**
  Register exception interface
@@ -106,6 +112,24 @@ typedef NS_OPTIONS(NSInteger,JJExceptionGuardCategory){
  */
 + (void)registerExceptionHandle:(id<JJExceptionHandle>)exceptionHandle;
 
+/**
+ Whether a single guard category is currently active.
+
+ Hooks are installed once and stay installed; this is the runtime gate they
+ consult, so -configExceptionCategory: takes effect immediately and one category
+ can be switched on or off without restarting the app.
+
+ @param category the guard category to query
+ @return YES when that category is configured and protection is started
+ */
++ (BOOL)isGuardCategoryEnabled:(JJExceptionGuardCategory)category;
+
 @end
+
+/**
+ C-level variant of +[JJException isGuardCategoryEnabled:], used inside the hooks
+ (which are called very frequently and must not go through message dispatch).
+ */
+FOUNDATION_EXPORT BOOL JJExceptionGuardEnabled(JJExceptionGuardCategory category);
 
 NS_ASSUME_NONNULL_END

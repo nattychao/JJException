@@ -68,10 +68,13 @@ Pod::Spec.new do |s|
   #s.platform     = :ios, "8.0"
 
   #  When using multiple platforms
-  s.ios.deployment_target = "8.0"
-  s.osx.deployment_target = "10.8"
-  s.watchos.deployment_target = "2.0"
-  s.tvos.deployment_target = "9.0"
+  # Xcode 27 rejects anything below 15.0, and the iOS 18 KVO guard needs a proper
+  # availability check, so the minimum moved up from 8.0.
+  s.ios.deployment_target = "15.0"
+  # Other platforms are untested in this fork; declare only iOS.
+  # s.osx.deployment_target = "10.8"
+  # s.watchos.deployment_target = "2.0"
+  # s.tvos.deployment_target = "9.0"
 
 
   # ――― Source Location ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
