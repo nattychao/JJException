@@ -1,9 +1,27 @@
 //
-//  NSTimer+CleanResource.m
+//  NSTimer+CleanTimer.m
 //  JJException
 //
 //  Created by Jezz on 2018/9/4.
 //  Copyright © 2018年 Jezz. All rights reserved.
+//
+//  Rewritten for the nattychao fork.
+//
+//  What upstream did: replaced the real target with a `TimerObject` proxy and made
+//  that proxy hold the target weakly. That silently converts NSTimer's documented
+//  strong reference into a weak one. NSTimer retaining its target means a live
+//  target can never be messaged after death, so the proxy never prevented a crash;
+//  it only turned a retain cycle (leak) into a timer that stops firing, and it
+//  broke third-party SDKs (JPush and similar) whose timer target is owned solely
+//  by the timer.
+//
+//  This version keeps Foundation's ownership semantics and guards the inputs that
+//  actually crash the process:
+//    - a NULL selector: SIGBUS inside CFRunLoopTimerCreate before any ObjC stack
+//      exists, so it cannot be caught afterwards. Measured on iOS 18.6.
+//    - a target that does not implement the selector: unrecognized selector on the
+//      first fire.
+//    - a nil target with a non-nil selector: cannot fire, always a caller bug.
 //
 
 #import <objc/runtime.h>
@@ -13,83 +31,49 @@
 #import "NSObject+SwizzleHook.h"
 #import "JJExceptionProxy.h"
 
-/**
- Copy the NSTimer Info
- */
-@interface TimerObject : NSObject
-
-@property(nonatomic,readwrite,assign)NSTimeInterval ti;
-
-/**
- weak reference target
- */
-@property(nonatomic,readwrite,weak)id target;
-
-@property(nonatomic,readwrite,assign)SEL selector;
-
-@property(nonatomic,readwrite,assign)id userInfo;
-
-/**
- TimerObject Associated NSTimer
- */
-@property(nonatomic,readwrite,weak)NSTimer* timer;
-
-/**
- Record the target class name
- */
-@property(nonatomic,readwrite,copy)NSString* targetClassName;
-
-/**
- Record the target method name
- */
-@property(nonatomic,readwrite,copy)NSString* targetMethodName;
-
-@end
-
-
-@implementation TimerObject
-
-- (void)fireTimer{
-    if (!self.target) {
-        [self.timer invalidate];
-        self.timer = nil;
-        handleCrashException(JJExceptionGuardNSTimer,[NSString stringWithFormat:@"Need invalidate timer from target:%@ method:%@",self.targetClassName,self.targetMethodName]);
-        return;
-    }
-    if ([self.target respondsToSelector:self.selector]) {
-        // Fix swift case, the parent class is SwiftObject, did not invoke the methodSignatureForSelector method
-        // https://github.com/jezzmemo/JJException/issues/123
-        ((void(*)(id, SEL, NSTimer*))objc_msgSend)(self.target, self.selector, _timer);
-    }
-}
-
-@end
-
 @implementation NSTimer (CleanTimer)
 
 + (void)jj_swizzleNSTimer{
-    swizzleClassMethod([NSTimer class], @selector(scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:), @selector(hookScheduledTimerWithTimeInterval:target:selector:userInfo:repeats:));
+    swizzleClassMethod([self class], @selector(scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:), @selector(hookScheduledTimerWithTimeInterval:target:selector:userInfo:repeats:));
+    swizzleClassMethod([self class], @selector(timerWithTimeInterval:target:selector:userInfo:repeats:), @selector(hookTimerWithTimeInterval:target:selector:userInfo:repeats:));
+}
+
+/// YES when the arguments are safe to forward to Foundation.
++ (BOOL)jj_validateTimerTarget:(id)aTarget selector:(SEL)aSelector context:(const char *)context {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardNSTimer)) {
+        return YES;
+    }
+    if (!aSelector) {
+        handleCrashException(JJExceptionGuardNSTimer,
+                             [NSString stringWithFormat:@"NSTimer %s selector is NULL (would SIGBUS)", context]);
+        return NO;
+    }
+    if (!aTarget) {
+        handleCrashException(JJExceptionGuardNSTimer,
+                             [NSString stringWithFormat:@"NSTimer %s target is nil, timer can never fire", context]);
+        return NO;
+    }
+    if (![aTarget respondsToSelector:aSelector]) {
+        handleCrashException(JJExceptionGuardNSTimer,
+                             [NSString stringWithFormat:@"NSTimer %s target:%@ does not respond to %@",
+                              context, NSStringFromClass([aTarget class]), NSStringFromSelector(aSelector)]);
+        return NO;
+    }
+    return YES;
 }
 
 + (NSTimer*)hookScheduledTimerWithTimeInterval:(NSTimeInterval)ti target:(id)aTarget selector:(SEL)aSelector userInfo:(nullable id)userInfo repeats:(BOOL)yesOrNo{
-    if (!yesOrNo) {
-        return [self hookScheduledTimerWithTimeInterval:ti target:aTarget selector:aSelector userInfo:userInfo repeats:yesOrNo];
+    if (![self jj_validateTimerTarget:aTarget selector:aSelector context:"scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:"]) {
+        return nil;
     }
-    TimerObject* timerObject = [TimerObject new];
-    timerObject.ti = ti;
-    timerObject.target = aTarget;
-    timerObject.selector = aSelector;
-    timerObject.userInfo = userInfo;
-    if (aTarget) {
-        timerObject.targetClassName = [NSString stringWithCString:object_getClassName(aTarget) encoding:NSASCIIStringEncoding];
+    return [self hookScheduledTimerWithTimeInterval:ti target:aTarget selector:aSelector userInfo:userInfo repeats:yesOrNo];
+}
+
++ (NSTimer*)hookTimerWithTimeInterval:(NSTimeInterval)ti target:(id)aTarget selector:(SEL)aSelector userInfo:(nullable id)userInfo repeats:(BOOL)yesOrNo{
+    if (![self jj_validateTimerTarget:aTarget selector:aSelector context:"timerWithTimeInterval:target:selector:userInfo:repeats:"]) {
+        return nil;
     }
-    timerObject.targetMethodName = NSStringFromSelector(aSelector);
-    
-    NSTimer* timer = [NSTimer hookScheduledTimerWithTimeInterval:ti target:timerObject selector:@selector(fireTimer) userInfo:userInfo repeats:yesOrNo];
-    timerObject.timer = timer;
-    
-    return timer;
-    
+    return [self hookTimerWithTimeInterval:ti target:aTarget selector:aSelector userInfo:userInfo repeats:yesOrNo];
 }
 
 @end

@@ -20,6 +20,9 @@ JJSYNTH_DUMMY_CLASS(NSSet_SetHook)
 }
 
 + (instancetype)hookSetWithObject:(id)object{
+    if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
+        return [self hookSetWithObject:object];
+    }
     if (object){
         return [self hookSetWithObject:object];
     }

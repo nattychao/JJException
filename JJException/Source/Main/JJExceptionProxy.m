@@ -98,24 +98,56 @@ uintptr_t get_slide_address(void) {
     if (!exceptionMessage) {
         return;
     }
-    
-    NSArray* callStack = [NSThread callStackSymbols];
-    NSString* callStackString = [NSString stringWithFormat:@"%@",callStack];
-    
+
+    // Re-entrancy guard. Reporting builds strings and calls the delegate; if either
+    // path trips the same guard again (e.g. a delegate that appends to a string
+    // with an out-of-range substring), the process would recurse until the stack
+    // overflows. One report per thread at a time is enough.
+    static NSString *const reentryKey = @"com.github.nattychao.JJException.reporting";
+    NSMutableDictionary *threadDictionary = [[NSThread currentThread] threadDictionary];
+    if ([threadDictionary[reentryKey] boolValue]) {
+        return;
+    }
+    threadDictionary[reentryKey] = @YES;
+    @try {
+        [self jj_reportExceptionMessage:exceptionMessage
+                     exceptionCategory:exceptionCategory
+                               extraInfo:info];
+    } @finally {
+        [threadDictionary removeObjectForKey:reentryKey];
+    }
+}
+
+- (void)jj_reportExceptionMessage:(NSString *)exceptionMessage
+                exceptionCategory:(JJExceptionGuardCategory)exceptionCategory
+                          extraInfo:(NSDictionary *)info {
+    NSArray* callStack = nil;
+    @try {
+        callStack = [NSThread callStackSymbols];
+    } @catch (NSException *exception) {
+        callStack = @[];
+    }
+    NSString* callStackString = [NSString stringWithFormat:@"%@",callStack ?: @[]];
+
     uintptr_t loadAddress =  get_load_address();
     uintptr_t slideAddress =  get_slide_address();
-    
+
     NSString* exceptionResult = [NSString stringWithFormat:@"%ld\n%ld\n%@\n%@",loadAddress,slideAddress,exceptionMessage,callStackString];
-    
-    
-    if ([self.delegate respondsToSelector:@selector(handleCrashException:extraInfo:)]){
-        [self.delegate handleCrashException:exceptionResult extraInfo:info];
+
+    // The delegate is app code. It must never be able to turn a recovered
+    // exception into a crash of the reporting path.
+    @try {
+        if ([self.delegate respondsToSelector:@selector(handleCrashException:extraInfo:)]){
+            [self.delegate handleCrashException:exceptionResult extraInfo:info];
+        }
+
+        if ([self.delegate respondsToSelector:@selector(handleCrashException:exceptionCategory:extraInfo:)]) {
+            [self.delegate handleCrashException:exceptionResult exceptionCategory:exceptionCategory extraInfo:info];
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[JJException] reporting delegate threw: %@", exception);
     }
-    
-    if ([self.delegate respondsToSelector:@selector(handleCrashException:exceptionCategory:extraInfo:)]) {
-        [self.delegate handleCrashException:exceptionResult exceptionCategory:exceptionCategory extraInfo:info];
-    }
-    
+
 #ifdef DEBUG
     NSLog(@"================================JJException Start==================================");
     NSLog(@"JJException Type:%ld",(long)exceptionCategory);
@@ -185,3 +217,16 @@ uintptr_t get_slide_address(void) {
 }
 
 @end
+
+BOOL JJExceptionGuardEnabled(JJExceptionGuardCategory category) {
+    // JJExceptionGuardNone is used by the internal "report only" API, which must
+    // always be delivered regardless of which categories are enabled.
+    if (category == JJExceptionGuardNone) {
+        return YES;
+    }
+    JJExceptionProxy *proxy = [JJExceptionProxy shareExceptionProxy];
+    if (!proxy.isProtectException) {
+        return NO;
+    }
+    return (proxy.exceptionGuardCategory & category) != 0;
+}

@@ -17,14 +17,21 @@ JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
 @implementation NSMutableSet (MutableSetHook)
 
 + (void)jj_swizzleNSMutableSet{
-    NSMutableSet* instanceObject = [NSMutableSet new];
-    Class cls =  object_getClass(instanceObject);
-    
+    // Resolve the concrete class without leaking the probe instance.
+    Class cls = object_getClass([NSMutableSet set]);
+    if (!cls) {
+        return;
+    }
+
     swizzleInstanceMethod(cls,@selector(addObject:), @selector(hookAddObject:));
     swizzleInstanceMethod(cls,@selector(removeObject:), @selector(hookRemoveObject:));
 }
 
 - (void) hookAddObject:(id)object {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
+        [self hookAddObject:object];
+        return;
+    }
     if (object) {
         [self hookAddObject:object];
     } else {
@@ -33,6 +40,10 @@ JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
 }
 
 - (void) hookRemoveObject:(id)object {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
+        [self hookRemoveObject:object];
+        return;
+    }
     if (object) {
         [self hookRemoveObject:object];
     } else {

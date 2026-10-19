@@ -22,27 +22,60 @@ JJSYNTH_DUMMY_CLASS(NSDictionary_DictionaryHook)
 
 + (instancetype) hookDictionaryWithObject:(id)object forKey:(id)key
 {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardDictionaryContainer)) {
+        return [self hookDictionaryWithObject:object forKey:key];
+    }
     if (object && key) {
         return [self hookDictionaryWithObject:object forKey:key];
     }
     handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSDictionary dictionaryWithObject invalid object:%@ and key:%@",object,key]);
     return nil;
 }
+
 + (instancetype) hookDictionaryWithObjects:(const id [])objects forKeys:(const id [])keys count:(NSUInteger)cnt
 {
-    NSInteger index = 0;
-    id ks[cnt];
-    id objs[cnt];
-    for (NSInteger i = 0; i < cnt ; ++i) {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardDictionaryContainer)) {
+        return [self hookDictionaryWithObjects:objects forKeys:keys count:cnt];
+    }
+    if ((!objects || !keys) && cnt > 0) {
+        handleCrashException(JJExceptionGuardDictionaryContainer,@"NSDictionary dictionaryWithObjects NULL object or key pointer");
+        return nil;
+    }
+
+    // Fixed stack buffers instead of the original zero-length VLAs.
+    id stackKeys[32];
+    id stackObjects[32];
+    id *ks = stackKeys;
+    id *objs = stackObjects;
+    BOOL heap = NO;
+    if (cnt > 32) {
+        ks = (id *)malloc(sizeof(id) * cnt);
+        objs = (id *)malloc(sizeof(id) * cnt);
+        if (!ks || !objs) {
+            if (ks) free(ks);
+            if (objs) free(objs);
+            handleCrashException(JJExceptionGuardDictionaryContainer,@"NSDictionary dictionaryWithObjects malloc failed");
+            return nil;
+        }
+        heap = YES;
+    }
+
+    NSUInteger index = 0;
+    for (NSUInteger i = 0; i < cnt; i++) {
         if (keys[i] && objects[i]) {
             ks[index] = keys[i];
             objs[index] = objects[i];
-            ++index;
+            index++;
         }else{
             handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSDictionary dictionaryWithObjects invalid keys:%@ and object:%@",keys[i],objects[i]]);
         }
     }
-    return [self hookDictionaryWithObjects:objs forKeys:ks count:index];
+    id result = [self hookDictionaryWithObjects:objs forKeys:ks count:index];
+    if (heap) {
+        free(ks);
+        free(objs);
+    }
+    return result;
 }
 
 @end

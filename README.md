@@ -7,6 +7,15 @@
 
 # JJException
 
+> **This is the `nattychao/JJException` fork (0.2.14).**
+> The API is unchanged, but the guards were fixed where upstream failed exactly
+> when protection was needed — including a double-free of
+> `NSKeyValueObservationInfo` on iOS 18 (upstream issue #147).
+> **See [FORK_CHANGELOG.md](FORK_CHANGELOG.md) for every change, its root cause
+> and the iOS 18.6 / 27.1 verification results.**
+> New in this fork: `JJExceptionGuardEnabled(category)` — enable or disable a
+> single guard at runtime, without restarting and without losing the swizzles.
+
 Common problems will not crash by the JJException,Hook the Unrecognized Selector,Out of bound,Paramter is nil,etc.Throw the exception to the interface,And then save the exception record to the log,Upgrad the app or Hot-Fix to resolve the exception.
 
 

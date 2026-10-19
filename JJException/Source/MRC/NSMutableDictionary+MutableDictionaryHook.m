@@ -22,26 +22,40 @@ JJSYNTH_DUMMY_CLASS(NSMutableDictionary_MutableDictionaryHook)
 }
 
 - (void) hookSetObject:(id)object forKey:(id)key {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardDictionaryContainer)) {
+        [self hookSetObject:object forKey:key];
+        return;
+    }
     if (object && key) {
         [self hookSetObject:object forKey:key];
     } else {
-        handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSMutableDictionary setObject invalid object:%@ and key:%@",object,key],self);
+        handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSMutableDictionary setObject invalid object:%@ and key:%@",object,key]);
     }
 }
 
 - (void) hookRemoveObjectForKey:(id)key {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardDictionaryContainer)) {
+        [self hookRemoveObjectForKey:key];
+        return;
+    }
     if (key) {
         [self hookRemoveObjectForKey:key];
     } else {
-        handleCrashException(JJExceptionGuardDictionaryContainer,@"NSMutableDictionary removeObjectForKey nil key",self);
+        handleCrashException(JJExceptionGuardDictionaryContainer,@"NSMutableDictionary removeObjectForKey nil key");
     }
 }
 
 - (void) hookSetObject:(id)object forKeyedSubscript:(id<NSCopying>)key {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardDictionaryContainer)) {
+        [self hookSetObject:object forKeyedSubscript:key];
+        return;
+    }
+    // `dict[key] = nil` is documented as removal, so a nil object is legal here;
+    // only a nil key is a real error.
     if (key) {
         [self hookSetObject:object forKeyedSubscript:key];
     } else {
-        handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSMutableDictionary setObject object:%@ and forKeyedSubscript:%@",object,key],self);
+        handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSMutableDictionary setObject object:%@ and forKeyedSubscript:nil",object]);
     }
 }
 

@@ -16,7 +16,7 @@ Pod::Spec.new do |s|
   #
 
   s.name         = "JJException"
-  s.version      = "0.2.13"
+  s.version      = "0.2.14"
   s.summary      = "Handle the objective-c crash exception."
 
   # This description is used to generate tags and improve search results.
@@ -28,7 +28,7 @@ Pod::Spec.new do |s|
                   JJException Handle the objective-c crash exception.
                    DESC
 
-  s.homepage     = "https://github.com/jezzmemo/JJException"
+  s.homepage     = "https://github.com/nattychao/JJException"
   # s.screenshots  = "www.example.com/screenshots_1.gif", "www.example.com/screenshots_2.gif"
 
 
@@ -80,7 +80,7 @@ Pod::Spec.new do |s|
   #  Supports git, hg, bzr, svn and HTTP.
   #
 
-  s.source       = { :git => "https://github.com/jezzmemo/JJException.git", :tag => "#{s.version}" }
+  s.source       = { :git => "https://github.com/nattychao/JJException.git", :tag => "#{s.version}" }
 
 
   # ――― Source Code ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
@@ -124,6 +124,9 @@ Pod::Spec.new do |s|
     spec.source_files  = "JJException/Source/MRC/*.{h,m}"
     spec.dependency 'JJException/Swizzle'
     spec.dependency 'JJException/Main'
+    # NSObject+KVOCrash.m needs JJWeakObjectBox (ARC-compiled) because clang
+    # forbids __weak inside a manual-reference-counting translation unit.
+    spec.dependency 'JJException/DeallocBlock'
   end
 
   s.subspec 'DeallocBlock' do |spec|
