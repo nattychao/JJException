@@ -25,6 +25,21 @@ JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
 
     swizzleInstanceMethod(cls,@selector(addObject:), @selector(hookAddObject:));
     swizzleInstanceMethod(cls,@selector(removeObject:), @selector(hookRemoveObject:));
+
+    /* Not every mutable set is __NSSetM. Measured concrete classes: CFSet bridging
+       produces __NSCFSet, and NSCountedSet is a separate root. Both are mutable and
+       both crash on a nil argument, so they need the same hooks. */
+    Class cfSet = NSClassFromString(@"__NSCFSet");
+    if (cfSet) {
+        swizzleInstanceMethod(cfSet, @selector(addObject:), @selector(hookAddObject:));
+        swizzleInstanceMethod(cfSet, @selector(removeObject:), @selector(hookRemoveObject:));
+    }
+
+    Class countedSet = NSClassFromString(@"NSCountedSet");
+    if (countedSet) {
+        swizzleInstanceMethod(countedSet, @selector(addObject:), @selector(hookAddObject:));
+        swizzleInstanceMethod(countedSet, @selector(removeObject:), @selector(hookRemoveObject:));
+    }
 }
 
 - (void) hookAddObject:(id)object {
