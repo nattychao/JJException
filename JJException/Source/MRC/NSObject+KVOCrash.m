@@ -382,6 +382,12 @@ static BOOL jj_kvoAllowsSubjectCleanupDuringDealloc(void) {
  * Never touches Foundation while holding the bookkeeping lock.
  */
 - (void)jj_cleanKVO{
+    // Fast path: most objects never took part in KVO, and dealloc is a bad place
+    // to do work. One associated-object lookup instead of three lock round-trips.
+    if (!jj_kvoContainer(self, NO)) {
+        return;
+    }
+
     BOOL allowsSubjectCleanup = jj_kvoAllowsSubjectCleanupDuringDealloc();
 
     // Case 1: this object is an observer. Removing itself from live subjects is

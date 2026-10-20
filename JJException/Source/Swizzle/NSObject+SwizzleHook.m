@@ -213,6 +213,14 @@ void jj_swizzleDeallocIfNeeded(Class class)
         cleanupSEL = sel_registerName("jj_cleanKVO");
     });
 
+    // The dealloc hook calls -jj_cleanKVO, which lives in a category on NSObject.
+    // Classes with a different root (NSProxy and its subclasses) do not inherit
+    // it, so hooking their dealloc would send an unrecognized selector from inside
+    // dealloc - an instant, uncatchable crash. Skip them instead.
+    if (!class_respondsToSelector(class, cleanupSEL)) {
+        return;
+    }
+
     jj_setupSwizzleState();
     // The old implementation released this lock before actually swizzling, so two
     // threads could both swizzle and the second one captured the first hook as the
@@ -223,8 +231,6 @@ void jj_swizzleDeallocIfNeeded(Class class)
         [jjSwizzleLock unlock];
         return;
     }
-
-    objc_setAssociatedObject(class, &jjSwizzledDeallocKey, @(YES), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     Method dealloc = NULL;
 
@@ -247,6 +253,7 @@ void jj_swizzleDeallocIfNeeded(Class class)
     }
     if (!deallocTypes) {
         // Never call class_addMethod with a NULL type encoding (the old code did).
+        // The class is NOT marked as swizzled, so a later call can retry.
         [jjSwizzleLock unlock];
         return;
     }
@@ -258,14 +265,17 @@ void jj_swizzleDeallocIfNeeded(Class class)
             return;
         }
 
-        class_addMethod(class, deallocSEL, imp_implementationWithBlock(^(__unsafe_unretained id self) {
+        if (!class_addMethod(class, deallocSEL, imp_implementationWithBlock(^(__unsafe_unretained id self) {
 
             ((void(*)(id, SEL))objc_msgSend)(self, cleanupSEL);
 
             struct objc_super superStruct = (struct objc_super){ self, superclass };
             ((void (*)(struct objc_super*, SEL))objc_msgSendSuper)(&superStruct, deallocSEL);
 
-        }), deallocTypes);
+        }), deallocTypes)) {
+            [jjSwizzleLock unlock];
+            return;
+        }
     }else{
         __block IMP deallocIMP = method_setImplementation(dealloc, imp_implementationWithBlock(^(__unsafe_unretained id self) {
             ((void(*)(id, SEL))objc_msgSend)(self, cleanupSEL);
@@ -273,6 +283,11 @@ void jj_swizzleDeallocIfNeeded(Class class)
             ((void(*)(id, SEL))deallocIMP)(self, deallocSEL);
         }));
     }
+
+    // Only mark the class once the hook is actually in place. Marking earlier
+    // (as an intermediate version did) would permanently skip a class whose
+    // install was aborted, silently disabling its KVO cleanup.
+    objc_setAssociatedObject(class, &jjSwizzledDeallocKey, @(YES), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     [jjSwizzleLock unlock];
 }

@@ -37,6 +37,9 @@
 | 对类簇具体类 `class_replaceMethod` 时可能改到父类共享的 IMP | 会污染同族其他类 | 先 `class_addMethod` 给目标类一份自己的钩子，再做交换 |
 | 先 swizzle 父类、再 swizzle 继承该方法的子类时，子类拿到的是父类**已换成钩子**的 IMP | 子类会被静默绕过（实测 hookCount=0），守卫对子类完全不生效 | 检测"本类未实现 + 祖先已 swizzle"时直接跳过，靠继承复用祖先的钩子；两种顺序都实测恰好调用 1 次 |
 | `class_copyMethodList` 未判空就 `free` | 分配失败时 `free(NULL)`（无害但不严谨） | 判空后再释放 |
+| dealloc 钩子在安装可能提前失败之前就打了"已安装"标记 | 一次失败的安装会让该类永久跳过 KVO 清理 | 改为安装成功后再标记 |
+| dealloc 钩子不检查目标类是否继承到 `-jj_cleanKVO` | `NSProxy` 及其子类不继承 NSObject category，钩子会在 dealloc 里发不存在的 selector → 不可捕获的崩溃 | 用 `class_respondsToSelector` 预检，不满足就跳过 |
+| `jj_cleanKVO` 对从未参与 KVO 的对象也做 3 次加锁查询 | dealloc 是高频热路径，额外开销 | 加一次关联对象快路径，绝大多数对象提前返回 |
 
 ### 1.2 整数回绕：越界检查在最该生效时失效（最严重）
 
@@ -272,7 +275,6 @@ BOOL on = [JJException isGuardCategoryEnabled:JJExceptionGuardArrayContainer];
 - swizzle 父子类两种顺序（父先/子先），验证钩子对两者都恰好生效一次
 
 ### 4.3 为什么没有直接换成 RSSwizzle / Aspects
-
 两个库都很成熟，但都不适合替代这里的 swizzle 核心。
 
 **Aspects 1.4.1**：机制是给**每个实例**动态生成子类（`Xxx_Aspects_`）再替换 `class`，
@@ -325,6 +327,40 @@ xcrun simctl launch --console-pty <UDID> com.nattychao.JJExceptionDemo -JJAutoTe
 
 # 压力测试
 xcrun simctl launch --console-pty <UDID> com.nattychao.JJExceptionDemo -JJStressTest
+
+# 对抗测试：nil / NSNotFound / NSUIntegerMax / 空集合 / 对象中途死亡 / 并发拆解
+xcrun simctl launch --console-pty <UDID> com.nattychao.JJExceptionDemo -JJAdversarialTest
+
+# 长时间稳定性：按线上实际启用的 category 组合持续压测
+xcrun simctl launch --console-pty <UDID> com.nattychao.JJExceptionDemo -JJSoakTest 60
+
+# 僵尸对象模式（抓过度释放最有效）
+SIMCTL_CHILD_NSZombieEnabled=YES xcrun simctl launch --console-pty <UDID> \
+    com.nattychao.JJExceptionDemo -JJAdversarialTest
 ```
 
 UI 里每个 category 一个开关，点任意用例会弹窗显示守卫实际拦到了什么（完整调用栈在控制台）。
+
+---
+
+## 7. "不引入新崩溃"的专项验证
+
+原库已在线上稳定运行多年，所以 fork 的验收标准不只是"多修了几个 bug"，而是
+**不能引入任何新的崩溃路径**。为此在双模拟器上做了四组验证，全部通过：
+
+| 验证 | iOS 18.6 | iOS 27.1 |
+|---|---|---|
+| 41 个崩溃点用例（守卫全开） | 41/41 存活，0 逃逸 | 41/41 存活，0 逃逸 |
+| 对抗测试：12 组极端输入 | failures=0 | failures=0 |
+| 压力测试：10 项并发/开关/层级 | failures=0 | failures=0 |
+| **僵尸对象模式**跑对抗 + 压力 | failures=0（无过度释放） | failures=0 |
+| 长时间 soak（线上同款 category 组合） | 60s / 6 线程 / 21.8 万次混合操作，存活 | 45s / 6 线程 / 17.4 万次，存活 |
+| 内存足迹（90s soak） | 43.7M 起，43.7M 止，无增长 | — |
+
+对抗测试覆盖的输入包括：`NSNotFound` / `NSUIntegerMax` 下标、`NSMakeRange(NSUIntegerMax-1, 5)`
+回绕范围、NULL 指针与 count 组合、空集合、nil observer / NULL selector、在观察回调里释放对象、
+`NSProxy` 子类、并发拆解。每一项都断言进程存活且合法操作仍然工作正常。
+
+soak 测试用的是项目实际启用的组合（Array | Dictionary | String | UnrecognizedSelector |
+NotificationCenter，不含 KVO / NSTimer），并按 7:3 混合合法操作与脏数据，同时持续做通知注册
+和（未启用守卫的）KVO 增删，确保"守卫关掉的路径"也没被改坏。
