@@ -368,6 +368,37 @@ AvoidCrash 的 `getMainCallStackSymbolMessageWithCallStackSymbols:` 会遍历调
 过滤掉系统帧，从而直接指出"是**你 App 的哪一行**调用了非法 API"。
 这比整条调用栈可读性高得多，已经加进本 fork 上报信息的末尾（`JJExceptionProxy`）。
 
+### 4.5 接入安全性：部分链接不再崩溃
+
+proxy 原先用裸 `performSelector:` 调用各 category 的 `+jj_swizzleXxx`。只要某个
+category 的 object file 没有被链接进 App（子 subspec、strip、将来删减代码），
+`configExceptionCategory:` 就会在启动时抛 unrecognized selector —— **一个防崩溃库
+自己把 App 打死**。已实测复现。
+
+改为 `JJExceptionSwizzleInstaller.h`：先用 `class_respondsToSelector` 检查（注意查的是
+**metaclass**，因为这些是类方法；查实例方法会全部返回 NO，把整个库静默关掉——这个
+错误也踩过一次），再 `@try` 包住调用。未链接的 category 安静跳过，其余照常工作。
+
+验证：只链接 `Main + Swizzle + DeallocBlock`、完全不链接任何 hook category，
+`configExceptionCategory:JJExceptionGuardAll` + `startGuardException` 正常返回，
+`stop/start` 反复调用也不崩。
+
+### 4.6 KVC 在容器类上的覆盖
+
+`-setValue:forKey:` 不是只有 NSObject 一份实现。实测 owner 映射（三个运行时一致）：
+
+| 类 | 实际实现者 |
+|---|---|
+| `NSObject` | `NSObject` |
+| `__NSDictionaryM` | **`NSMutableDictionary`**（不是 `__NSDictionaryM`） |
+| `__NSDictionaryI` | `NSObject` |
+| `__NSArrayM` | **`NSArray`**（不是 `__NSArrayM`） |
+
+所以必须在 `NSMutableDictionary` 和 `NSArray` 上额外 hook。而且必须使用**独立的 hook
+selector**：复用 NSObject 那个 selector 时，由于 NSObject 已经 swizzle 过，
+`class_getInstanceMethod` 会拿到已交换的方法，交换结果是把 NSObject 的**原始实现**
+装了上去——守卫被静默撤销（实测 IMP 变成了 NSObject 原来的地址）。
+
 ---
 
 ## 5. 其他 fork 的借鉴情况

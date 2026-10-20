@@ -10,6 +10,13 @@
 
 @interface NSObject (KVCHook)
 
+/// Swizzles the NSObject-level KVC entry points.
 + (void)jj_swizzleKVC;
+
+/// Swizzles the KVC entry points that Foundation overrides on a class other than
+/// NSObject. Must use its own hook selectors: NSMutableDictionary and NSArray
+/// override -setValue:forKey:, and reusing the NSObject hook selector would let the
+/// swizzle capture NSObject's original IMP instead of the hook.
++ (void)jj_swizzleKVCContainerOverrides;
 
 @end

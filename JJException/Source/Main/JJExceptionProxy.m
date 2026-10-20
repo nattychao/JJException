@@ -7,6 +7,7 @@
 //
 
 #import "JJExceptionProxy.h"
+#import "JJExceptionSwizzleInstaller.h"
 #import <mach-o/dyld.h>
 #import <objc/runtime.h>
 
@@ -298,40 +299,41 @@ static NSString *jj_mainCallStackSymbol(NSArray<NSString *> *callStackSymbols) {
     #pragma clang diagnostic ignored "-Wundeclared-selector"
 
     if(self.exceptionGuardCategory & JJExceptionGuardArrayContainer){
-        [NSArray performSelector:@selector(jj_swizzleNSArray)];
-        [NSMutableArray performSelector:@selector(jj_swizzleNSMutableArray)];
-        [NSSet performSelector:@selector(jj_swizzleNSSet)];
-        [NSMutableSet performSelector:@selector(jj_swizzleNSMutableSet)];
+        JJInstallSwizzle([NSArray class], @selector(jj_swizzleNSArray));
+        JJInstallSwizzle([NSMutableArray class], @selector(jj_swizzleNSMutableArray));
+        JJInstallSwizzle([NSSet class], @selector(jj_swizzleNSSet));
+        JJInstallSwizzle([NSMutableSet class], @selector(jj_swizzleNSMutableSet));
     }
     if(self.exceptionGuardCategory & JJExceptionGuardDictionaryContainer){
-        [NSDictionary performSelector:@selector(jj_swizzleNSDictionary)];
-        [NSMutableDictionary performSelector:@selector(jj_swizzleNSMutableDictionary)];
+        JJInstallSwizzle([NSDictionary class], @selector(jj_swizzleNSDictionary));
+        JJInstallSwizzle([NSMutableDictionary class], @selector(jj_swizzleNSMutableDictionary));
     }
     if(self.exceptionGuardCategory & JJExceptionGuardUnrecognizedSelector){
-        [NSObject performSelector:@selector(jj_swizzleUnrecognizedSelector)];
+        JJInstallSwizzle([NSObject class], @selector(jj_swizzleUnrecognizedSelector));
     }
 
     if (self.exceptionGuardCategory & JJExceptionGuardKVOCrash) {
-        [NSObject performSelector:@selector(jj_swizzleKVOCrash)];
+        JJInstallSwizzle([NSObject class], @selector(jj_swizzleKVOCrash));
     }
 
     if (self.exceptionGuardCategory & JJExceptionGuardNSTimer) {
-        [NSTimer performSelector:@selector(jj_swizzleNSTimer)];
+        JJInstallSwizzle([NSTimer class], @selector(jj_swizzleNSTimer));
     }
 
     if (self.exceptionGuardCategory & JJExceptionGuardNSNotificationCenter) {
-        [NSNotificationCenter performSelector:@selector(jj_swizzleNSNotificationCenter)];
+        JJInstallSwizzle([NSNotificationCenter class], @selector(jj_swizzleNSNotificationCenter));
     }
 
     if (self.exceptionGuardCategory & JJExceptionGuardNSStringContainer) {
-        [NSString performSelector:@selector(jj_swizzleNSString)];
-        [NSMutableString performSelector:@selector(jj_swizzleNSMutableString)];
-        [NSAttributedString performSelector:@selector(jj_swizzleNSAttributedString)];
-        [NSMutableAttributedString performSelector:@selector(jj_swizzleNSMutableAttributedString)];
+        JJInstallSwizzle([NSString class], @selector(jj_swizzleNSString));
+        JJInstallSwizzle([NSMutableString class], @selector(jj_swizzleNSMutableString));
+        JJInstallSwizzle([NSAttributedString class], @selector(jj_swizzleNSAttributedString));
+        JJInstallSwizzle([NSMutableAttributedString class], @selector(jj_swizzleNSMutableAttributedString));
     }
 
     if (self.exceptionGuardCategory & JJExceptionGuardKVCCrash) {
-        [NSObject performSelector:@selector(jj_swizzleKVC)];
+        JJInstallSwizzle([NSObject class], @selector(jj_swizzleKVC));
+        JJInstallSwizzle([NSObject class], @selector(jj_swizzleKVCContainerOverrides));
     }
     #pragma clang diagnostic pop
 }
