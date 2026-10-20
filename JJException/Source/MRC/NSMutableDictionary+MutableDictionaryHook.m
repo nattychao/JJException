@@ -10,6 +10,7 @@
 #import "NSObject+SwizzleHook.h"
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSMutableDictionary_MutableDictionaryHook)
 
@@ -26,11 +27,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableDictionary_MutableDictionaryHook)
         [self hookSetObject:object forKey:key];
         return;
     }
-    if (object && key) {
-        [self hookSetObject:object forKey:key];
-    } else {
+    if (!object || !key) {
         handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSMutableDictionary setObject invalid object:%@ and key:%@",object,key]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardDictionaryContainer, [self hookSetObject:object forKey:key]);
 }
 
 - (void) hookRemoveObjectForKey:(id)key {
@@ -38,11 +39,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableDictionary_MutableDictionaryHook)
         [self hookRemoveObjectForKey:key];
         return;
     }
-    if (key) {
-        [self hookRemoveObjectForKey:key];
-    } else {
+    if (!key) {
         handleCrashException(JJExceptionGuardDictionaryContainer,@"NSMutableDictionary removeObjectForKey nil key");
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardDictionaryContainer, [self hookRemoveObjectForKey:key]);
 }
 
 - (void) hookSetObject:(id)object forKeyedSubscript:(id<NSCopying>)key {
@@ -52,11 +53,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableDictionary_MutableDictionaryHook)
     }
     // `dict[key] = nil` is documented as removal, so a nil object is legal here;
     // only a nil key is a real error.
-    if (key) {
-        [self hookSetObject:object forKeyedSubscript:key];
-    } else {
+    if (!key) {
         handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSMutableDictionary setObject object:%@ and forKeyedSubscript:nil",object]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardDictionaryContainer, [self hookSetObject:object forKeyedSubscript:key]);
 }
 
 @end

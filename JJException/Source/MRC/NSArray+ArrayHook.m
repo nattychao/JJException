@@ -11,6 +11,7 @@
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
 #import "JJExceptionRange.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
 
@@ -55,6 +56,19 @@ JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
     swizzleInstanceMethod(NSClassFromString(@"NSConstantArray"), @selector(objectAtIndex:), @selector(hookObjectAtIndex:));
     swizzleInstanceMethod(NSClassFromString(@"NSConstantArray"), @selector(subarrayWithRange:), @selector(hookSubarrayWithRange:));
     swizzleInstanceMethod(NSClassFromString(@"NSConstantArray"), @selector(objectAtIndexedSubscript:), @selector(hookObjectAtIndexedSubscript:));
+
+    /* objectsAtIndexes: is implemented once on NSArray, so hooking the abstract
+       class covers every concrete subclass. getObjects:range: is NOT: each
+       concrete class implements its own copy (measured on 18.6/27.0/27.1), so it
+       has to be hooked per class or the guard is unreachable. */
+    swizzleInstanceMethod(NSClassFromString(@"NSArray"), @selector(objectsAtIndexes:), @selector(hookObjectsAtIndexes:));
+
+    NSArray *getObjectsClasses = @[@"__NSArray0", @"__NSArrayI", @"__NSArrayI_Transfer",
+                                   @"__NSSingleObjectArrayI", @"__NSArrayM",
+                                   @"NSConstantArray", @"__NSFrozenArrayM", @"__NSArrayReversed"];
+    for (NSString *className in getObjectsClasses) {
+        swizzleInstanceMethod(NSClassFromString(className), @selector(getObjects:range:), @selector(hookGetObjects:range:));
+    }
 }
 
 + (instancetype) hookArrayWithObject:(id)anObject
@@ -63,7 +77,7 @@ JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
         return [self hookArrayWithObject:anObject];
     }
     if (anObject) {
-        return [self hookArrayWithObject:anObject];
+        return JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookArrayWithObject:anObject]);
     }
     handleCrashException(JJExceptionGuardArrayContainer,@"NSArray arrayWithObject object is nil");
     return nil;
@@ -73,11 +87,11 @@ JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
     if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
         return [self hookObjectAtIndex:index];
     }
-    if (index < self.count) {
-        return [self hookObjectAtIndex:index];
+    if (index >= self.count) {
+        handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray objectAtIndex invalid index:%lu total:%lu",(unsigned long)index,(unsigned long)self.count]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray objectAtIndex invalid index:%lu total:%lu",(unsigned long)index,(unsigned long)self.count]);
-    return nil;
+    return JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookObjectAtIndex:index]);
 }
 
 - (id) hookObjectAtIndexedSubscript:(NSInteger)index {
@@ -85,11 +99,11 @@ JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
         return [self hookObjectAtIndexedSubscript:index];
     }
     NSUInteger unsignedIndex = (NSUInteger)index;
-    if (unsignedIndex < self.count) {
-        return [self hookObjectAtIndexedSubscript:(NSInteger)unsignedIndex];
+    if (unsignedIndex >= self.count) {
+        handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray objectAtIndexedSubscript invalid index:%lu total:%lu",(unsigned long)unsignedIndex,(unsigned long)self.count]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray objectAtIndexedSubscript invalid index:%lu total:%lu",(unsigned long)unsignedIndex,(unsigned long)self.count]);
-    return nil;
+    return JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookObjectAtIndexedSubscript:(NSInteger)unsignedIndex]);
 }
 
 - (NSArray *)hookSubarrayWithRange:(NSRange)range
@@ -97,20 +111,58 @@ JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
     if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
         return [self hookSubarrayWithRange:range];
     }
-    if (JJExceptionIsValidRange(range, self.count)) {
-        return [self hookSubarrayWithRange:range];
+    if (!JJExceptionIsValidRange(range, self.count)) {
+        if (range.location < self.count) {
+            // Keep upstream behaviour (truncate), but report it: silently returning
+            // a shorter array hides the caller's bug.
+            NSRange clamped = JJExceptionClampRange(range, self.count);
+            handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray subarrayWithRange invalid range location:%lu length:%lu, clamped to location:%lu length:%lu",
+                                                                 (unsigned long)range.location,(unsigned long)range.length,
+                                                                 (unsigned long)clamped.location,(unsigned long)clamped.length]);
+            return JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookSubarrayWithRange:clamped]);
+        }
+        handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray subarrayWithRange invalid range location:%lu length:%lu",(unsigned long)range.location,(unsigned long)range.length]);
+        return nil;
     }
-    if (range.location < self.count) {
-        // Keep upstream behaviour (truncate), but report it: silently returning a
-        // shorter array hides the caller's bug.
-        NSRange clamped = JJExceptionClampRange(range, self.count);
-        handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray subarrayWithRange invalid range location:%lu length:%lu, clamped to location:%lu length:%lu",
-                                                             (unsigned long)range.location,(unsigned long)range.length,
-                                                             (unsigned long)clamped.location,(unsigned long)clamped.length]);
-        return [self hookSubarrayWithRange:clamped];
+    return JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookSubarrayWithRange:range]);
+}
+
+/// Covers every concrete array subclass because NSArray implements it.
+- (void)hookGetObjects:(__unsafe_unretained id _Nonnull *)objects range:(NSRange)range {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
+        [self hookGetObjects:objects range:range];
+        return;
     }
-    handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray subarrayWithRange invalid range location:%lu length:%lu",(unsigned long)range.location,(unsigned long)range.length]);
-    return nil;
+    if (!objects) {
+        handleCrashException(JJExceptionGuardArrayContainer,@"NSArray getObjects:range: NULL output buffer");
+        return;
+    }
+    if (!JJExceptionIsValidRange(range, self.count)) {
+        handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray getObjects:range: invalid range location:%lu length:%lu total:%lu",
+                                                             (unsigned long)range.location,(unsigned long)range.length,(unsigned long)self.count]);
+        return;
+    }
+    JJ_NET_VOID(JJExceptionGuardArrayContainer, [self hookGetObjects:objects range:range]);
+}
+
+- (NSArray *)hookObjectsAtIndexes:(NSIndexSet *)indexes {
+    if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
+        return [self hookObjectsAtIndexes:indexes];
+    }
+    if (!indexes) {
+        handleCrashException(JJExceptionGuardArrayContainer,@"NSArray objectsAtIndexes: nil index set");
+        return nil;
+    }
+    // Checking the bounds up front is cheaper and more precise than letting
+    // Foundation raise; NSIndexSet exposes only first/last index cheaply, which is
+    // exactly what an out-of-range test needs.
+    NSUInteger last = indexes.lastIndex;
+    if (indexes.count > 0 && last >= self.count) {
+        handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray objectsAtIndexes: index %lu beyond bounds total:%lu",
+                                                             (unsigned long)last,(unsigned long)self.count]);
+        return nil;
+    }
+    return JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookObjectsAtIndexes:indexes]);
 }
 
 + (instancetype)hookArrayWithObjects:(const id [])objects count:(NSUInteger)cnt
@@ -143,7 +195,7 @@ JJSYNTH_DUMMY_CLASS(NSArray_ArrayHook)
             handleCrashException(JJExceptionGuardArrayContainer,[NSString stringWithFormat:@"NSArray arrayWithObjects invalid index object:%lu total:%lu",(unsigned long)i,(unsigned long)cnt]);
         }
     }
-    id result = [self hookArrayWithObjects:objs count:index];
+    id result = JJ_NET_OBJ(JJExceptionGuardArrayContainer, nil, [self hookArrayWithObjects:objs count:index]);
     if (objs != stackObjects) {
         free(objs);
     }

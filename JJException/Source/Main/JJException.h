@@ -21,6 +21,8 @@ NS_ASSUME_NONNULL_BEGIN
  - JJExceptionGuardNSTimer: NSTimer
  - JJExceptionGuardNSNotificationCenter: NSNotificationCenter
  - JJExceptionGuardNSStringContainer:NSString,NSMutableString,NSAttributedString,NSMutableAttributedString
+ - JJExceptionGuardKVCCrash: KVC setter exceptions (setValue:forKey:, forKeyPath,
+   forUndefinedKey:, setValuesForKeysWithDictionary:)
  - JJExceptionGuardAll: Above All
  */
 typedef NS_OPTIONS(NSInteger,JJExceptionGuardCategory){
@@ -32,7 +34,8 @@ typedef NS_OPTIONS(NSInteger,JJExceptionGuardCategory){
     JJExceptionGuardNSTimer = 1 << 5,
     JJExceptionGuardNSNotificationCenter = 1 << 6,
     JJExceptionGuardNSStringContainer = 1 << 7,
-    JJExceptionGuardAll = JJExceptionGuardUnrecognizedSelector | JJExceptionGuardDictionaryContainer | JJExceptionGuardArrayContainer | JJExceptionGuardKVOCrash | JJExceptionGuardNSTimer | JJExceptionGuardNSNotificationCenter | JJExceptionGuardNSStringContainer,
+    JJExceptionGuardKVCCrash = 1 << 8,
+    JJExceptionGuardAll = JJExceptionGuardUnrecognizedSelector | JJExceptionGuardDictionaryContainer | JJExceptionGuardArrayContainer | JJExceptionGuardKVOCrash | JJExceptionGuardNSTimer | JJExceptionGuardNSNotificationCenter | JJExceptionGuardNSStringContainer | JJExceptionGuardKVCCrash,
 };
 
 /**

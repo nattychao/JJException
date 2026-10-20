@@ -118,6 +118,112 @@ uintptr_t get_slide_address(void) {
     }
 }
 
+/// First frame in the call stack that belongs to the host app rather than to the
+/// system or to this library.
+///
+/// Borrowed from chenfanfang/AvoidCrash: pointing at "your app's -[Class method]"
+/// is far more useful than a 40-frame dump that is mostly Foundation internals.
+static NSString *jj_mainCallStackSymbol(NSArray<NSString *> *callStackSymbols) {
+    if (callStackSymbols.count == 0) {
+        return nil;
+    }
+    // -[Class method] / +[Class method]
+    static NSRegularExpression *regex;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"[-\\+]\\[.+\\]"
+                                                          options:0
+                                                            error:NULL];
+    });
+    if (!regex) {
+        return nil;
+    }
+
+    // Skip the frames that are this library's own plumbing. Match the specific
+    // internal symbols, NOT the substring "JJException": host apps very often have
+    // "JJException" in their own binary name, which would discard every frame.
+    static NSArray<NSString *> *internalMarkers;
+    static dispatch_once_t markersOnce;
+    dispatch_once(&markersOnce, ^{
+        internalMarkers = @[@"JJExceptionProxy",
+                            @"jj_reportExceptionMessage",
+                            @"handleCrashException",
+                            @"jj_swizzle",
+                            @"hookObject",
+                            @"hookSubstring",
+                            @"hookSetObject"];
+    });
+
+    // System suffixes that are never "the app's own code".
+    static NSArray<NSString *> *systemPrefixes;
+    static dispatch_once_t prefixesOnce;
+    dispatch_once(&prefixesOnce, ^{
+        systemPrefixes = @[@"__", @"NS", @"UI", @"CA", @"CF", @"CG", @"_", @"Swift",
+                           @"Foundation", @"CoreFoundation", @"dyld", @"libsystem"];
+    });
+
+    for (NSUInteger index = 0; index < callStackSymbols.count; index++) {
+        NSString *symbol = callStackSymbols[index];
+
+        BOOL isInternal = NO;
+        for (NSString *marker in internalMarkers) {
+            if ([symbol containsString:marker]) {
+                isInternal = YES;
+                break;
+            }
+        }
+        if (isInternal) {
+            continue;
+        }
+
+        NSRange match = [regex rangeOfFirstMatchInString:symbol
+                                                 options:0
+                                                   range:NSMakeRange(0, symbol.length)];
+        if (match.location == NSNotFound) {
+            continue;
+        }
+        NSString *frame = [symbol substringWithRange:match];
+
+        // Extract the class name from "[ClassName method]".
+        NSRange open = [frame rangeOfString:@"["];
+        if (open.location == NSNotFound) {
+            continue;
+        }
+        NSString *afterBracket = [frame substringFromIndex:NSMaxRange(open)];
+        NSString *className = [[afterBracket componentsSeparatedByString:@" "] firstObject];
+        if ([className hasSuffix:@")"]) {
+            continue;   // category / block frame, e.g. NSMutableArray(MutableArrayHook)
+        }
+
+        BOOL isSystem = NO;
+        for (NSString *prefix in systemPrefixes) {
+            if ([className hasPrefix:prefix]) {
+                isSystem = YES;
+                break;
+            }
+        }
+        if (isSystem) {
+            continue;
+        }
+
+        // Prefer a frame that belongs to the main bundle, but accept any
+        // non-system frame: with Xcode's debug-dylib layout the app's classes can
+        // report a bundle different from mainBundle.
+        @try {
+            Class cls = NSClassFromString(className);
+            if (cls && [NSBundle bundleForClass:cls] == [NSBundle mainBundle]) {
+                return frame;
+            }
+        } @catch (NSException *exception) {
+            // Ignore: a bad frame must never break reporting.
+        }
+
+        // Fallback: first plausible non-system frame we saw.
+        return frame;
+    }
+    return nil;
+}
+
 - (void)jj_reportExceptionMessage:(NSString *)exceptionMessage
                 exceptionCategory:(JJExceptionGuardCategory)exceptionCategory
                           extraInfo:(NSDictionary *)info {
@@ -132,7 +238,12 @@ uintptr_t get_slide_address(void) {
     uintptr_t loadAddress =  get_load_address();
     uintptr_t slideAddress =  get_slide_address();
 
-    NSString* exceptionResult = [NSString stringWithFormat:@"%ld\n%ld\n%@\n%@",loadAddress,slideAddress,exceptionMessage,callStackString];
+    NSString *location = jj_mainCallStackSymbol(callStack);
+    NSString *exceptionResult = location.length > 0
+        ? [NSString stringWithFormat:@"%ld\n%ld\n%@\nError Place:%@\n%@",
+                                     loadAddress, slideAddress, exceptionMessage, location, callStackString]
+        : [NSString stringWithFormat:@"%ld\n%ld\n%@\n%@",
+                                     loadAddress, slideAddress, exceptionMessage, callStackString];
 
     // The delegate is app code. It must never be able to turn a recovered
     // exception into a crash of the reporting path.
@@ -217,6 +328,10 @@ uintptr_t get_slide_address(void) {
         [NSMutableString performSelector:@selector(jj_swizzleNSMutableString)];
         [NSAttributedString performSelector:@selector(jj_swizzleNSAttributedString)];
         [NSMutableAttributedString performSelector:@selector(jj_swizzleNSMutableAttributedString)];
+    }
+
+    if (self.exceptionGuardCategory & JJExceptionGuardKVCCrash) {
+        [NSObject performSelector:@selector(jj_swizzleKVC)];
     }
     #pragma clang diagnostic pop
 }

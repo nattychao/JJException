@@ -204,10 +204,45 @@ delegate 抛异常不会把已恢复的异常变成新崩溃。
 | `NSArray+...` `subarrayWithRange:` 越界但 location 合法 | 静默截断，不上报 | 仍截断，但**上报**，否则调用方的 bug 永远看不见 |
 | `NSAttributedString` / `NSMutableSet` / `NSMutableSet` swizzle 入口 | `[X new]` 探针实例泄漏 | 改用 `alloc/init` 或 `[NSMutableSet set]`，不再泄漏 |
 
+### 2.1 补上原来完全没有的崩溃点
+
+逐条对照 chenfanfang/AvoidCrash 的覆盖范围后，发现这些崩溃点我们和上游**都没有**守卫，
+在 iOS 18.6 上实测每一个都会抛异常：
+
+| 崩溃点 | 原库 | 本 fork |
+|---|---|---|
+| `-[NSArray getObjects:range:]` | 无 | ✅（注意：每个具体数组类各有一份实现，必须逐类 hook） |
+| `-[NSArray objectsAtIndexes:]` | 无 | ✅（只在 NSArray 上有一份实现，hook 抽象类即可） |
+| `-[NSString stringByReplacingCharactersInRange:withString:]` | 无 | ✅ |
+| `-[NSString stringByReplacingOccurrencesOfString:withString:]` | 无 | ✅ |
+| `-[NSString stringByReplacingOccurrencesOfString:withString:options:range:]` | 无 | ✅ |
+| `-[NSString stringByAppendingString:]` | 无 | ✅ |
+| `-[NSObject setValue:forKey:]` | 无 KVC category | ✅ 新增 `JJExceptionGuardKVCCrash` |
+| `-[NSObject setValue:forKeyPath:]` | 无 | ✅ |
+| `-[NSObject setValue:forUndefinedKey:]` | 无 | ✅ |
+| `-[NSObject setValuesForKeysWithDictionary:]` | 无 | ✅ |
+| `-[NSMutableDictionary setValue:forKey:]` | 无 | ✅ |
+
+### 2.2 每个 hook 加 @try/@catch 兜底（借鉴 AvoidCrash 的架构）
+
+上游（以及本 fork 早期版本）的做法是**纯预检查**：手工枚举崩溃点，逐个写边界判断。
+这种做法的固有缺陷是——**没枚举到的输入仍然会到 Foundation 并抛异常**。上面 2.1 表里
+那 11 个崩溃点就是这么漏掉的。
+
+AvoidCrash 的做法相反：不预检查，直接 `@try/@catch` 包住 Foundation 调用。
+好处是自动覆盖所有崩溃路径，坏处是拿不到正确的返回值（只能返回 nil/0）。
+
+本 fork 两者都用：
+
+1. **预检查**已知的崩溃点 → 返回**正确的**值（例如 `subarrayWithRange:` 截断后返回真实子数组）
+2. 所有转发调用都包在 `@try/@catch`（`JJExceptionGuardNet.h` 的 `JJ_NET_*` 宏）
+   → 任何没预料到的输入都被上报，而不是杀掉 App
+
+代价实测：arm64 上未触发的 `@try` 在 200 万次热循环里只增加 **1.4%**（零成本异常机制）。
+
 ---
 
 ## 3. 新增能力：运行时可开关
-
 文件：`JJException.h`（公共 API）、`JJExceptionProxy.h/.m`（实现）
 
 上游的 `startGuardException` / `stopGuardException` 只在"关→开"时重新 swizzle；swizzle 本身
@@ -299,6 +334,60 @@ BOOL on = [JJException isGuardCategoryEnabled:JJExceptionGuardArrayContainer];
 上面表格里唯一有价值的那条（父子类顺序），已经用自动化的方式补进了本 fork，
 并用 demo 的压力测试覆盖（父先 / 子先两种顺序，各自必须恰好调用 1 次）。
 
+### 4.4 从 AvoidCrash 借鉴了什么（以及为什么不是全部照搬）
+
+`chenfanfang/AvoidCrash`（1643★，最后提交 2020-03）功能范围与 JJException 接近，
+读完实现后有取舍：
+
+**采纳的**
+
+| 点 | AvoidCrash 的做法 | 本 fork |
+|---|---|---|
+| `@try/@catch` 兜底 | 每个 hook 直接 try/catch 包住 Foundation 调用 | 采纳。作为**预检查之外的兜底**，见 2.2 |
+| KVC 守卫 | 覆写 `setValue:forKey:` / `forKeyPath:` / `forUndefinedKey:` / `setValuesForKeysWithDictionary:` | 采纳，新增 `JJExceptionGuardKVCCrash` |
+| 崩溃点定位 | 用正则从 `callStackSymbols` 里提取 **主工程**的 `-[类 方法]`，过滤系统栈 | 采纳，见下 |
+| `getObjects:range:` / `objectsAtIndexes:` | 都覆盖了 | 采纳（补上我们漏掉的） |
+| `stringByReplacing*` 系列 | 都覆盖了 | 采纳 |
+
+**没有采纳的，以及原因**
+
+| 点 | AvoidCrash 的做法 | 为什么不照搬 |
+|---|---|---|
+| 只 try/catch 不预检查 | 返回值只能给 nil/0/原对象 | 会改变业务语义。例如 `subarrayWithRange:` 越界后 AvoidCrash 返回 nil，而正确做法是截断后返回真实子数组。本 fork 保留预检查优先 |
+| unrecognized selector 的类白名单 | 需要手动 `setupNoneSelClassStringsArr:` / `PrefixsArr:` 配置，且强制排除 `UI*`、`NS*` | 默认关闭 + 要手工配，等于默认不生效；而且白名单漏配就是漏防护。本 fork 默认对所有走 NSObject 默认 forwarded 的类生效 |
+| 用 `AvoidCrashStubProxy` + `proxyMethod` 伪造签名 | 返回 `void` 签名 | 问题与我们分析的 1.7 相同：返回类型仍是猜的。本 fork 明确记录这条限制 |
+| 全局 `method_exchangeImplementations` | 没有幂等保护、没有空指针检查、没有并发锁 | 这些正是本 fork 1.1 修掉的问题。AvoidCrash 的 `exchangeInstanceMethod:` 在 `class_getInstanceMethod` 返回 NULL 时会崩 |
+| `dispatch_once` 锁死初始化 | `becomeEffective` 只能调一次，之后无法改配置 | 与本 fork 的运行时开关设计直接冲突 |
+| 错误通过 `NSNotification` 异步上报 | 多一层主队列跳转 | 本 fork 直接用 delegate 同步回调，宿主可以自行决定是否异步 |
+
+**采纳的那条"崩溃点定位"补充说明**
+
+AvoidCrash 的 `getMainCallStackSymbolMessageWithCallStackSymbols:` 会遍历调用栈，
+用正则 `[-\+]\[.+\]` 匹配，再用
+`[NSBundle bundleForClass:NSClassFromString(className)] == [NSBundle mainBundle]`
+过滤掉系统帧，从而直接指出"是**你 App 的哪一行**调用了非法 API"。
+这比整条调用栈可读性高得多，已经加进本 fork 上报信息的末尾（`JJExceptionProxy`）。
+
+---
+
+## 5. 其他 fork 的借鉴情况
+
+在 GitHub 上按 `crash protector` / `AvoidCrash` 等关键词筛过所有仍在更新的 ObjC 仓库，
+结论是**没有值得借鉴的实现**：
+
+| 仓库 | 最后提交 | 内容 | 结论 |
+|---|---|---|---|
+| `firestory/AvoidCrash` | 2026-10 | 0 star，无实质改动 | 无 |
+| `Sunyc666/crashProtectorTest1` | 2025-07 | 0 star，测试脚手架 | 无 |
+| `zkHub/AvoidCrashes` | 2024-01 | 0 star | 无 |
+| `qieyanhong/CrashProtector` | 2023-07 | 1 star | 无 |
+| `igovee/AvoidCrash` | 2023-05 | 0 star | 无 |
+| `loveuqian/JJException` | 2026-07 | 3 个提交，见 4.1 | 已采纳 nil 检查思路 |
+| `BWLi420/BWException` | 2025-10 | 1 个提交，且是重复修复 | 无 |
+| `feiyu002/JJException-fyFork` | 2025-02 | 只加 PrivacyInfo | 无 |
+
+也就是说：这个品类里**唯一有参考价值的是 AvoidCrash**，其余 fork 都不构成参考。
+
 ---
 
 ## 5. 已知限制（不打算"修"的）
@@ -356,11 +445,11 @@ UI 里每个 category 一个开关，点任意用例会弹窗显示守卫实际�
 
 | 验证项 | iOS 18.6 | iOS 27.0 | iOS 27.1 |
 |---|---|---|---|
-| 41→43 个崩溃点用例（守卫全开） | 43/43 存活 | 43/43 存活 | 43/43 存活 |
-| 对抗测试（17 组极端输入） | failures=0 | failures=0 | failures=0 |
+| 崩溃点用例（守卫全开） | 45/45 存活 | 45/45 存活 | 45/45 存活 |
+| 对抗测试（20 组极端输入） | failures=0 | failures=0 | failures=0 |
 | 压力测试（10 项并发/开关/层级） | failures=0 | failures=0 | failures=0 |
 | 僵尸对象模式重跑对抗 + 压力 | failures=0 | failures=0 | failures=0 |
-| 长时间 soak（线上同款组合，40s） | 14.6 万次存活 | 15.5 万次存活 | 15.7 万次存活 |
+| 长时间 soak（线上同款组合，25s） | 8.5 万次存活 | 9.2 万次存活 | 9.2 万次存活 |
 
 ### 7.2 覆盖分析发现的新缺陷
 

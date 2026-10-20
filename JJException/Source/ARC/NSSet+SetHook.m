@@ -10,6 +10,7 @@
 #import "NSObject+SwizzleHook.h"
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSSet_SetHook)
 
@@ -23,11 +24,11 @@ JJSYNTH_DUMMY_CLASS(NSSet_SetHook)
     if (!JJExceptionGuardEnabled(JJExceptionGuardArrayContainer)) {
         return [self hookSetWithObject:object];
     }
-    if (object){
-        return [self hookSetWithObject:object];
+    if (!object){
+        handleCrashException(JJExceptionGuardArrayContainer,@"NSSet setWithObject nil object");
+        return nil;
     }
-    handleCrashException(JJExceptionGuardArrayContainer,@"NSSet setWithObject nil object");
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardArrayContainer, nil, [self hookSetWithObject:object]);
 }
 
 @end

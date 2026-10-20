@@ -12,6 +12,7 @@
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
 #import "JJExceptionRange.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSAttributedString_AttributedStringHook)
 
@@ -36,33 +37,35 @@ JJSYNTH_DUMMY_CLASS(NSAttributedString_AttributedStringHook)
     if (!JJExceptionGuardEnabled(JJExceptionGuardNSStringContainer)) {
         return [self hookInitWithString:str];
     }
-    if (str){
-        return [self hookInitWithString:str];
+    if (!str){
+        handleCrashException(JJExceptionGuardNSStringContainer,@"NSAttributedString initWithString parameter nil");
+        return nil;
     }
-    handleCrashException(JJExceptionGuardNSStringContainer,@"NSAttributedString initWithString parameter nil");
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardNSStringContainer, nil, [self hookInitWithString:str]);
 }
 
 - (id)hookAttribute:(NSAttributedStringKey)attrName atIndex:(NSUInteger)location effectiveRange:(nullable NSRangePointer)range{
     if (!JJExceptionGuardEnabled(JJExceptionGuardNSStringContainer)) {
         return [self hookAttribute:attrName atIndex:location effectiveRange:range];
     }
-    if (location < self.length){
-        return [self hookAttribute:attrName atIndex:location effectiveRange:range];
+    if (location >= self.length){
+        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSAttributedString attribute:atIndex:effectiveRange: attrName:%@ location:%lu length:%lu",attrName,(unsigned long)location,(unsigned long)self.length]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSAttributedString attribute:atIndex:effectiveRange: attrName:%@ location:%lu length:%lu",attrName,(unsigned long)location,(unsigned long)self.length]);
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardNSStringContainer, nil,
+                         [self hookAttribute:attrName atIndex:location effectiveRange:range]);
 }
 
 - (NSAttributedString *)hookAttributedSubstringFromRange:(NSRange)range{
     if (!JJExceptionGuardEnabled(JJExceptionGuardNSStringContainer)) {
         return [self hookAttributedSubstringFromRange:range];
     }
-    if (JJExceptionIsValidRange(range, self.length)) {
-        return [self hookAttributedSubstringFromRange:range];
+    if (!JJExceptionIsValidRange(range, self.length)) {
+        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSAttributedString attributedSubstringFromRange range:%@ length:%lu",NSStringFromRange(range),(unsigned long)self.length]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSAttributedString attributedSubstringFromRange range:%@ length:%lu",NSStringFromRange(range),(unsigned long)self.length]);
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardNSStringContainer, nil,
+                         [self hookAttributedSubstringFromRange:range]);
 }
 
 - (void)hookEnumerateAttribute:(NSString *)attrName inRange:(NSRange)range options:(NSAttributedStringEnumerationOptions)opts usingBlock:(void (^)(id _Nullable, NSRange, BOOL * _Nonnull))block{
@@ -71,11 +74,12 @@ JJSYNTH_DUMMY_CLASS(NSAttributedString_AttributedStringHook)
         return;
     }
     // An empty range at `length` is legal for enumeration; NSNotFound is not.
-    if (JJExceptionIsValidRange(range, self.length)) {
-        [self hookEnumerateAttribute:attrName inRange:range options:opts usingBlock:block];
-    }else{
+    if (!JJExceptionIsValidRange(range, self.length)) {
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSAttributedString enumerateAttribute attrName:%@ range:%@ length:%lu",attrName,NSStringFromRange(range),(unsigned long)self.length]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer,
+                [self hookEnumerateAttribute:attrName inRange:range options:opts usingBlock:block]);
 }
 
 - (void)hookEnumerateAttributesInRange:(NSRange)range options:(NSAttributedStringEnumerationOptions)opts usingBlock:(void (^)(NSDictionary<NSString*,id> * _Nonnull, NSRange, BOOL * _Nonnull))block{
@@ -85,14 +89,16 @@ JJSYNTH_DUMMY_CLASS(NSAttributedString_AttributedStringHook)
     }
     // {NSNotFound, 0} means "the whole string" and is forwarded untouched.
     if (range.location == NSNotFound && range.length == 0) {
-        [self hookEnumerateAttributesInRange:range options:opts usingBlock:block];
+        JJ_NET_VOID(JJExceptionGuardNSStringContainer,
+                    [self hookEnumerateAttributesInRange:range options:opts usingBlock:block]);
         return;
     }
-    if (JJExceptionIsValidRange(range, self.length)) {
-        [self hookEnumerateAttributesInRange:range options:opts usingBlock:block];
-    } else {
+    if (!JJExceptionIsValidRange(range, self.length)) {
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSAttributedString enumerateAttributesInRange range:%@ length:%lu",NSStringFromRange(range),(unsigned long)self.length]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer,
+                [self hookEnumerateAttributesInRange:range options:opts usingBlock:block]);
 }
 
 @end

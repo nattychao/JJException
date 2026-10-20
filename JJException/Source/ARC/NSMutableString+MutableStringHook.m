@@ -11,6 +11,7 @@
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
 #import "JJExceptionRange.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSMutableString_MutableStringHook)
 
@@ -33,11 +34,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableString_MutableStringHook)
         [self hookAppendString:aString];
         return;
     }
-    if (aString){
-        [self hookAppendString:aString];
-    }else{
+    if (!aString){
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString appendString value:%@ parameter nil",self]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer, [self hookAppendString:aString]);
 }
 
 - (void) hookInsertString:(NSString *)aString atIndex:(NSUInteger)loc{
@@ -45,11 +46,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableString_MutableStringHook)
         [self hookInsertString:aString atIndex:loc];
         return;
     }
-    if (aString && loc <= self.length) {
-        [self hookInsertString:aString atIndex:loc];
-    }else{
+    if (!aString || loc > self.length) {
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString insertString:atIndex: value:%@ paremeter string:%@ atIndex:%lu",self,aString,(unsigned long)loc]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer, [self hookInsertString:aString atIndex:loc]);
 }
 
 - (void) hookDeleteCharactersInRange:(NSRange)range{
@@ -57,11 +58,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableString_MutableStringHook)
         [self hookDeleteCharactersInRange:range];
         return;
     }
-    if (JJExceptionIsValidRange(range, self.length)){
-        [self hookDeleteCharactersInRange:range];
-    }else{
+    if (!JJExceptionIsValidRange(range, self.length)){
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString deleteCharactersInRange value:%@ range:%@",self,NSStringFromRange(range)]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer, [self hookDeleteCharactersInRange:range]);
 }
 
 - (void) hookReplaceCharactersInRange:(NSRange)range withString:(NSString *)str{
@@ -69,13 +70,15 @@ JJSYNTH_DUMMY_CLASS(NSMutableString_MutableStringHook)
         [self hookReplaceCharactersInRange:range withString:str];
         return;
     }
-    if (str && JJExceptionIsValidRange(range, self.length)) {
-        [self hookReplaceCharactersInRange:range withString:str];
-    }else if (!str){
+    if (!str){
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString replaceCharactersInRange:withString: value:%@ string nil range:%@",self,NSStringFromRange(range)]);
-    }else{
-        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString replaceCharactersInRange:withString: value:%@ string:%@ range:%@",self,str,NSStringFromRange(range)]);
+        return;
     }
+    if (!JJExceptionIsValidRange(range, self.length)){
+        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString replaceCharactersInRange:withString: value:%@ string:%@ range:%@",self,str,NSStringFromRange(range)]);
+        return;
+    }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer, [self hookReplaceCharactersInRange:range withString:str]);
 }
 
 - (void) hookSetString:(NSString *)aString{
@@ -83,44 +86,44 @@ JJSYNTH_DUMMY_CLASS(NSMutableString_MutableStringHook)
         [self hookSetString:aString];
         return;
     }
-    if (aString) {
-        [self hookSetString:aString];
-    }else{
+    if (!aString) {
         handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString setString nil value:%@",self]);
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardNSStringContainer, [self hookSetString:aString]);
 }
 
 - (NSString *)hookSubstringFromIndex:(NSUInteger)from{
     if (!JJExceptionGuardEnabled(JJExceptionGuardNSStringContainer)) {
         return [self hookSubstringFromIndex:from];
     }
-    if (from <= self.length) {
-        return [self hookSubstringFromIndex:from];
+    if (from > self.length) {
+        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString substringFromIndex value:%@ from:%lu",self,(unsigned long)from]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString substringFromIndex value:%@ from:%lu",self,(unsigned long)from]);
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardNSStringContainer, nil, [self hookSubstringFromIndex:from]);
 }
 
 - (NSString *)hookSubstringToIndex:(NSUInteger)to{
     if (!JJExceptionGuardEnabled(JJExceptionGuardNSStringContainer)) {
         return [self hookSubstringToIndex:to];
     }
-    if (to <= self.length) {
-        return [self hookSubstringToIndex:to];
+    if (to > self.length) {
+        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString substringToIndex value:%@ to:%lu",self,(unsigned long)to]);
+        return self;
     }
-    handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString substringToIndex value:%@ to:%lu",self,(unsigned long)to]);
-    return self;
+    return JJ_NET_SCALAR(id, JJExceptionGuardNSStringContainer, nil, [self hookSubstringToIndex:to]);
 }
 
 - (NSString *)hookSubstringWithRange:(NSRange)range{
     if (!JJExceptionGuardEnabled(JJExceptionGuardNSStringContainer)) {
         return [self hookSubstringWithRange:range];
     }
-    if (JJExceptionIsValidRange(range, self.length)) {
-        return [self hookSubstringWithRange:range];
+    if (!JJExceptionIsValidRange(range, self.length)) {
+        handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString substringWithRange value:%@ range:%@",self,NSStringFromRange(range)]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardNSStringContainer,[NSString stringWithFormat:@"NSMutableString substringWithRange value:%@ range:%@",self,NSStringFromRange(range)]);
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardNSStringContainer, nil, [self hookSubstringWithRange:range]);
 }
 
 @end

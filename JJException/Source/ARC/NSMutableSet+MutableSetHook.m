@@ -11,6 +11,7 @@
 #import <objc/runtime.h>
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
 
@@ -19,12 +20,10 @@ JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
 + (void)jj_swizzleNSMutableSet{
     // Resolve the concrete class without leaking the probe instance.
     Class cls = object_getClass([NSMutableSet set]);
-    if (!cls) {
-        return;
+    if (cls) {
+        swizzleInstanceMethod(cls,@selector(addObject:), @selector(hookAddObject:));
+        swizzleInstanceMethod(cls,@selector(removeObject:), @selector(hookRemoveObject:));
     }
-
-    swizzleInstanceMethod(cls,@selector(addObject:), @selector(hookAddObject:));
-    swizzleInstanceMethod(cls,@selector(removeObject:), @selector(hookRemoveObject:));
 
     /* Not every mutable set is __NSSetM. Measured concrete classes: CFSet bridging
        produces __NSCFSet, and NSCountedSet is a separate root. Both are mutable and
@@ -47,11 +46,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
         [self hookAddObject:object];
         return;
     }
-    if (object) {
-        [self hookAddObject:object];
-    } else {
+    if (!object) {
         handleCrashException(JJExceptionGuardArrayContainer,@"NSSet addObject nil object");
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardArrayContainer, [self hookAddObject:object]);
 }
 
 - (void) hookRemoveObject:(id)object {
@@ -59,11 +58,11 @@ JJSYNTH_DUMMY_CLASS(NSMutableSet_MutableSetHook)
         [self hookRemoveObject:object];
         return;
     }
-    if (object) {
-        [self hookRemoveObject:object];
-    } else {
+    if (!object) {
         handleCrashException(JJExceptionGuardArrayContainer,@"NSSet removeObject nil object");
+        return;
     }
+    JJ_NET_VOID(JJExceptionGuardArrayContainer, [self hookRemoveObject:object]);
 }
 
 @end

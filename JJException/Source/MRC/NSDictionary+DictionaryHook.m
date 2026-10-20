@@ -10,6 +10,7 @@
 #import "NSObject+SwizzleHook.h"
 #import "JJExceptionProxy.h"
 #import "JJExceptionMacros.h"
+#import "JJExceptionGuardNet.h"
 
 JJSYNTH_DUMMY_CLASS(NSDictionary_DictionaryHook)
 
@@ -25,11 +26,11 @@ JJSYNTH_DUMMY_CLASS(NSDictionary_DictionaryHook)
     if (!JJExceptionGuardEnabled(JJExceptionGuardDictionaryContainer)) {
         return [self hookDictionaryWithObject:object forKey:key];
     }
-    if (object && key) {
-        return [self hookDictionaryWithObject:object forKey:key];
+    if (!object || !key) {
+        handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSDictionary dictionaryWithObject invalid object:%@ and key:%@",object,key]);
+        return nil;
     }
-    handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSDictionary dictionaryWithObject invalid object:%@ and key:%@",object,key]);
-    return nil;
+    return JJ_NET_SCALAR(id, JJExceptionGuardDictionaryContainer, nil, [self hookDictionaryWithObject:object forKey:key]);
 }
 
 + (instancetype) hookDictionaryWithObjects:(const id [])objects forKeys:(const id [])keys count:(NSUInteger)cnt
@@ -70,7 +71,8 @@ JJSYNTH_DUMMY_CLASS(NSDictionary_DictionaryHook)
             handleCrashException(JJExceptionGuardDictionaryContainer,[NSString stringWithFormat:@"NSDictionary dictionaryWithObjects invalid keys:%@ and object:%@",keys[i],objects[i]]);
         }
     }
-    id result = [self hookDictionaryWithObjects:objs forKeys:ks count:index];
+    id result = JJ_NET_SCALAR(id, JJExceptionGuardDictionaryContainer, nil,
+                              [self hookDictionaryWithObjects:objs forKeys:ks count:index]);
     if (heap) {
         free(ks);
         free(objs);
