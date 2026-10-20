@@ -48,12 +48,50 @@ static NSString *jj_swizzlePairKey(Class cls, SEL selector) {
 @end
 
 /**
+ YES when `cls` implements `selector` itself rather than inheriting it.
+
+ `class_getInstanceMethod` returns the Method of the class that actually
+ implements the selector, so pointer equality with the superclass's Method is a
+ reliable "not implemented here" test.
+ */
+static BOOL jj_implementsSelector(Class cls, SEL selector) {
+    if (!cls || !selector) {
+        return NO;
+    }
+    Method own = class_getInstanceMethod(cls, selector);
+    if (!own) {
+        return NO;
+    }
+    Class superclass = class_getSuperclass(cls);
+    if (!superclass) {
+        return YES;
+    }
+    return own != class_getInstanceMethod(superclass, selector);
+}
+
+/**
+ YES when a superclass of `cls` has already been swizzled for `originSelector`.
+
+ Must be called with jjSwizzleLock held.
+ */
+static BOOL jj_ancestorSwizzled(Class cls, SEL originSelector) {
+    for (Class current = class_getSuperclass(cls); current; current = class_getSuperclass(current)) {
+        if ([jjSwizzledPairs containsObject:jj_swizzlePairKey(current, originSelector)]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+/**
  Core swizzle, safe against:
  - nil class / selector / method
  - method missing on the current OS
  - being called twice for the same (class, selector)
  - two threads swizzling at the same time
  - mutating a superclass IMP when swizzling a class cluster's concrete class
+ - swizzling a subclass whose implementation is inherited from an already
+   swizzled superclass (see the comment at the call site)
  */
 static void jj_swizzleSelector(Class cls, SEL originSelector, SEL swizzleSelector, BOOL isClassMethod) {
     if (!cls || !originSelector || !swizzleSelector) {
@@ -85,6 +123,21 @@ static void jj_swizzleSelector(Class cls, SEL originSelector, SEL swizzleSelecto
     // A future iOS release removing one of these selectors must never crash the
     // app at startup. The old code dereferenced a NULL Method here.
     if (!originalMethod || !swizzledMethod) {
+        [jjSwizzleLock unlock];
+        return;
+    }
+
+    // Inherited-from-an-already-swizzled-ancestor case.
+    //
+    // If targetClass does not implement originSelector itself, the method it
+    // "has" is the ancestor's - and once the ancestor is swizzled that is the
+    // hook, not the original. Installing a copy here would either capture the
+    // hook as the "original" (which silently BYPASSES the guard for this class)
+    // or call the ancestor hook twice. The hook is already reachable through
+    // inheritance, so the correct action is to do nothing.
+    if (!jj_implementsSelector(targetClass, originSelector) &&
+        jj_ancestorSwizzled(targetClass, originSelector)) {
+        [jjSwizzledPairs addObject:pairKey];
         [jjSwizzleLock unlock];
         return;
     }

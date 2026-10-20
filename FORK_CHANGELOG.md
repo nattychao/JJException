@@ -35,6 +35,7 @@
 | `@synchronized(class)` 只保护了"检查 + 打标记"，真正的 swizzle 在锁外 | 两个线程同时给同一个类装 dealloc 钩子，第二个拿到的 old IMP 是第一个的钩子 → dealloc **递归调用自己 → 栈溢出** | 检查与交换整体加锁 |
 | `class_addMethod(..., method_getTypeEncoding(dealloc))` 在 `dealloc == NULL` 分支传入 **NULL 类型编码** | 给没有自定义 dealloc 的类加了一个类型编码为空的方法，运行时行为未定义 | 回退到 `NSObject` 的 dealloc 类型编码；仍取不到就放弃 |
 | 对类簇具体类 `class_replaceMethod` 时可能改到父类共享的 IMP | 会污染同族其他类 | 先 `class_addMethod` 给目标类一份自己的钩子，再做交换 |
+| 先 swizzle 父类、再 swizzle 继承该方法的子类时，子类拿到的是父类**已换成钩子**的 IMP | 子类会被静默绕过（实测 hookCount=0），守卫对子类完全不生效 | 检测"本类未实现 + 祖先已 swizzle"时直接跳过，靠继承复用祖先的钩子；两种顺序都实测恰好调用 1 次 |
 | `class_copyMethodList` 未判空就 `free` | 分配失败时 `free(NULL)`（无害但不严谨） | 判空后再释放 |
 
 ### 1.2 整数回绕：越界检查在最该生效时失效（最严重）
@@ -268,6 +269,32 @@ BOOL on = [JJException isGuardCategoryEnabled:JJExceptionGuardArrayContainer];
 - 8 线程 × 200 组 KVO 配对，交替让 observer / subject 先死
 - 200 个 timer 创建 + 200 次 NULL selector 尝试
 - 200 元素大容器的边界路径
+- swizzle 父子类两种顺序（父先/子先），验证钩子对两者都恰好生效一次
+
+### 4.3 为什么没有直接换成 RSSwizzle / Aspects
+
+两个库都很成熟，但都不适合替代这里的 swizzle 核心。
+
+**Aspects 1.4.1**：机制是给**每个实例**动态生成子类（`Xxx_Aspects_`）再替换 `class`，
+属于 AOP hook 一个"调用点"，不是替换类方法本身。用它做全局守卫会给每个被 hook 的实例
+建一个子类，内存和 `isKindOfClass:` 语义都会变，而且它对 `dealloc` 这类
+"任何类都可能被 hook"的场景不适用。上游也已归档（archived），不适合作为新依赖。
+
+**RSSwizzle 0.1.0**：核心 `swizzle()` 与我们的实现几乎是同构的（同样是
+`imp_implementationWithBlock` + `class_replaceMethod` + 延迟取 original IMP），
+没有额外能力可以"拿过来"。具体差异：
+
+| 项 | RSSwizzle 0.1.0 | 本 fork |
+|---|---|---|
+| 并发锁 | `OSSpinLock`，iOS 10 起已废弃（编译器直接告警），且有优先级反转问题 | `NSRecursiveLock` |
+| 父子类重复 hook | 提供 `RSSwizzleModeOncePerClassAndSuperclasses`，但**需要调用方主动指定**，默认 `Always` 会重复 hook | 自动识别祖先已 swizzle，无需参数 |
+| 空实现类型检查 | 在 `NS_BLOCK_ASSERTIONS` 下**整段编译掉**，Release 不校验 | 显式判空，Release 同样生效 |
+| 使用方式 | 宏 + 工厂 block，每个 hook 要写一遍完整函数签名 | 我们的钩子内部用 `objc_msgSend` 转发，一套模式覆盖所有 shape |
+| 维护状态 | 最后提交 2019-09，Podfile 锁 0.1.0 | 本仓库 |
+
+结论：**没有可搬的收益，还会引入一个新的停更依赖和一套基于已废弃 API 的锁。**
+上面表格里唯一有价值的那条（父子类顺序），已经用自动化的方式补进了本 fork，
+并用 demo 的压力测试覆盖（父先 / 子先两种顺序，各自必须恰好调用 1 次）。
 
 ---
 
