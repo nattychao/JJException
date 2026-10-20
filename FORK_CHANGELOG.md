@@ -4,7 +4,11 @@
 本 fork：<https://github.com/nattychao/JJException>（版本号 0.2.14）
 
 本文件只记录**与上游源码的差异**和**为什么这样改**。每一条都对应上游源码里可以指到行的问题，
-并在 iOS 18.6 / iOS 27.1 两个模拟器上实测过（见文末测试方法）。
+并在 iOS 18.6 / 27.0 / 27.1 三个模拟器运行时上实测过（见文末测试方法）。
+
+> **接入状态（2026-10-20）**：本 fork **尚未接入 Yehwang App**，线上仍是 0.2.13。
+> 决定与理由见 [INTEGRATION.md §7](INTEGRATION.md)：当前配置已避开最严重的两条问题，
+> 且没有线上崩溃数据支撑这次替换。§7.2 列出了什么情况下应重新评估。
 
 ---
 
@@ -282,24 +286,27 @@ BOOL on = [JJException isGuardCategoryEnabled:JJExceptionGuardArrayContainer];
 
 ## 4. 已验证内容
 
-环境：iOS 18.6（iPhone 16 Pro 模拟器）、iOS 27.1（iPhone Duo 模拟器），Xcode 27，arm64。
+环境：iOS 18.6（iPhone 16 Pro）、iOS 27.0（iPhone 18 Pro）、iOS 27.1（iPhone Duo）
+三个模拟器运行时，Xcode 27，arm64。三个运行时结果一致。
 
-### 4.1 逐 category 崩溃点对照（41 个用例，ON / OFF 各跑一遍）
+### 4.1 逐 category 崩溃点对照（45 个用例，ON / OFF 各跑一遍）
 
 | Category | 用例数 | 守卫 ON | 守卫 OFF |
 |---|---|---|---|
-| Array / Set | 11 | 全部拦截，进程存活 | 11 例全部抛异常 |
-| Dictionary | 4 | 全部拦截 | 4 例全部抛异常 |
-| String / AttributedString | 9 | 8 拦截 + 1 按 Foundation 语义放行 | 7 抛异常 + 2 按设计无害 |
-| Unrecognized Selector | 4 | 全部拦截 | 4 例全部抛异常 |
+| Array / Set | 15 | 全部拦截，进程存活 | 抛异常 |
+| Dictionary | 4 | 全部拦截 | 全部抛异常 |
+| String / AttributedString | 11 | 拦截 | 抛异常 |
+| Unrecognized Selector | 4 | 全部拦截 | 全部抛异常 |
+| KVC | 5 | 全部拦截 | 全部抛异常 |
 | KVO | 5 | 2 拦截 + 3 按设计无害 | 1 抛异常 + 4 无害 |
 | NSTimer | 4 | 3 拦截 + 1 按设计无害 | 1 进程直接死（SIGBUS）+ 3 无害 |
 | NotificationCenter | 4 | 2 拦截 + 2 按设计无害 | 全部无害（系统已弱引用 observer） |
 
-汇总（两个系统结果完全一致）：**守卫 ON 时 41/41 进程存活，0 例异常逃逸；守卫 OFF 时 28 例
-崩溃或抛异常、13 例按设计无害。**
+汇总：**守卫 ON 时 45/45 进程存活，0 例异常逃逸**（其中 45 例中有 7 例按设计本就
+不产生崩溃，因此没有上报）。守卫 OFF 时对应的用例恢复成原始 Foundation 行为，
+包括 28 例抛异常或信号崩溃、13 例按设计无害。
 
-### 4.2 压力测试（两系统各跑一遍，全部 PASS）
+### 4.2 压力测试（三个运行时各跑一遍，全部 PASS）
 
 - 20 线程 × 300 次非法调用，同时并发重配 category 12 次
 - 50 次 `stop/start` 循环后守卫仍然有效（上游会在这里静默失效）
@@ -309,6 +316,8 @@ BOOL on = [JJException isGuardCategoryEnabled:JJExceptionGuardArrayContainer];
 - 200 个 timer 创建 + 200 次 NULL selector 尝试
 - 200 元素大容器的边界路径
 - swizzle 父子类两种顺序（父先/子先），验证钩子对两者都恰好生效一次
+- `NSProxy` 子类：dealloc 钩子必须被跳过（不继承 `-jj_cleanKVO`）
+- 部分链接：只链接 Main + Swizzle + DeallocBlock 时配置 `GuardAll` 不崩
 
 ### 4.3 为什么没有直接换成 RSSwizzle / Aspects
 两个库都很成熟，但都不适合替代这里的 swizzle 核心。

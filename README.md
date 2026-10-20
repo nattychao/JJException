@@ -11,10 +11,20 @@
 > The API is unchanged, but the guards were fixed where upstream failed exactly
 > when protection was needed — including a double-free of
 > `NSKeyValueObservationInfo` on iOS 18 (upstream issue #147).
-> **See [FORK_CHANGELOG.md](FORK_CHANGELOG.md) for every change, its root cause
-> and the iOS 18.6 / 27.1 verification results.**
+>
+> **Documents**
+> - [FORK_CHANGELOG.md](FORK_CHANGELOG.md) — every change, its root cause, and the
+>   iOS 18.6 / 27.0 / 27.1 verification results.
+> - [INTEGRATION.md](INTEGRATION.md) — how to adopt it, and the **adoption decision
+>   record** (§7): this fork is currently **not** wired into the Yehwang app,
+>   because the shipped 0.2.13 configuration already avoids the two severe issues
+>   and there is no crash data justifying the full-app swizzle regression surface.
+>   §7.2 lists what would change that decision.
+>
 > New in this fork: `JJExceptionGuardEnabled(category)` — enable or disable a
 > single guard at runtime, without restarting and without losing the swizzles.
+> Also new: a `JJExceptionGuardKVCCrash` category, which upstream had no
+> equivalent of at all.
 
 Common problems will not crash by the JJException,Hook the Unrecognized Selector,Out of bound,Paramter is nil,etc.Throw the exception to the interface,And then save the exception record to the log,Upgrad the app or Hot-Fix to resolve the exception.
 

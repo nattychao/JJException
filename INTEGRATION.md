@@ -148,3 +148,57 @@ pod 'JJException', '~> 0.2.13'
 3. **iOS 15–17 未实机验证**：本机只有 iOS 18.6 / 27.0 / 27.1 运行时。
    代码层面部署目标是 15.0、所有新 API 都有 `@available` 保护，且三个运行时上
    具体类名完全一致，但这两个大版本的实测覆盖是空白。
+
+---
+
+## 七、接入评估结论（2026-10-20，决定：暂不接入）
+
+**结论：暂不替换现有 0.2.13。** 记录在这里，供将来重新评估时有据可依。
+
+### 7.1 为什么暂不接入
+
+1. **现有配置已经绕开了最危险的两个坑。** 线上 `AppDelegate+AvoidCrash.m` 里
+   `JJExceptionGuardKVOCrash` 只在 iOS 18 以下启用、`JJExceptionGuardNSTimer`
+   永久关闭。上游最严重的两条（iOS 18 双重释放 `NSKeyValueObservationInfo`、NSTimer
+   改所有权语义破坏第三方 SDK）在当前配置下都不会被触发。
+2. **剩余差异是"少拦一些"，不是"多崩几次"。** 在当前启用的 category 范围内，本 fork
+   相对 0.2.13 的收益是：range 无符号回绕修复、`NSConstantArray` / `__NSCFSet` /
+   `NSCountedSet` 覆盖补充、`@try` 兜底。这些都属于"某些脏数据本可以拦下来但没拦住"，
+   属于漏拦，不会制造新崩溃。
+3. **没有线上数据支撑这次替换。** 如果 Crashlytics 里 `com.Yehwang.JJException`
+   这个 domain 没有对应的 non-fatal 堆积，这次替换就没有可量化的收益，却要承担
+   全 App 的 swizzle 回归面。
+4. **最大的残余风险无法离线排除：与其它做 swizzle 的 pod 共存。**
+   这类库的历史事故（包括上游 #147）都是同一个模式——两家库同时对同一个方法做
+   swizzle。demo 验证的是本库在孤立环境下的正确性，**不能证明**它和项目里
+   Firebase、JPush、地图类等同时做 swizzle 的 SDK 共存无冲突。这一点在本机无法验证。
+
+### 7.2 什么情况下应该重新考虑
+
+出现以下任一情况时，值得把接入重新提上日程：
+
+- Crashlytics 里出现由以下原因造成的崩溃（当前库拦不住）：
+  - `NSRange` 相关异常且 range 来自计算结果（无符号回绕）
+  - 数组字面量（`@[...]` 全常量）越界
+  - `CFSet` 桥接后的 `addObject:` / `NSCountedSet` 传 nil
+  - KVC 的 `NSUnknownKeyException`（当前库完全没有 KVC 守卫）
+- 需要"运行中单独关闭某个守卫"的能力（本 fork 的 `isGuardCategoryEnabled:`）
+- 从上游拿到新的崩溃证据，确认本 fork 对应的修复确实是根因
+- 有 iOS 15–17 的实测环境，可以补齐上述空白
+
+### 7.3 如果决定接入
+
+按第四节的两步走；并强烈建议先做 kill switch：
+
+所有守卫的开关都收敛在 `JJExceptionGuardEnabled(category)` 这一个函数里，
+可以把它改成从远程配置 / `UserDefaults` 读一个 mask 覆盖值，实现"不发版就能关掉
+某个 category"。这是把"不敢用"变成"可控"最实际的做法。
+
+### 7.4 即使不接入，本仓库仍然有用
+
+- 作为 0.2.13 的**缺陷档案**：`FORK_CHANGELOG.md` 里每条问题都写清了根因与实测证据，
+  可以拿去核对线上崩溃是不是已知原因。
+- 作为**验证工具**：`/Users/yehwang/Desktop/JJExceptionDemo` 覆盖 45 个崩溃点、
+  20 组对抗输入、10 项压力测试，双系统可跑。线上出现某类崩溃时，可以用它快速确认
+  "本 fork 能不能拦住"，再决定是否接入。
+- 作为**将来升级的起点**：fork 与上游 API 完全一致，需要时可以按第七节的两步接入。
